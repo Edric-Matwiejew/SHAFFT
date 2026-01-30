@@ -579,7 +579,7 @@ inline Version getVersion() noexcept {
 }
 
 /**
- * @brief Get the library version as a string (e.g., "0.0.1").
+ * @brief Get the library version as a string (e.g., "0.0.1-alpha").
  * @ingroup cpp_api
  */
 inline const char* getVersionString() noexcept {
@@ -587,7 +587,8 @@ inline const char* getVersionString() noexcept {
   static const char version[] = 
     SHAFFT_STRINGIFY(SHAFFT_VERSION_MAJOR) "."
     SHAFFT_STRINGIFY(SHAFFT_VERSION_MINOR) "."
-    SHAFFT_STRINGIFY(SHAFFT_VERSION_PATCH);
+    SHAFFT_STRINGIFY(SHAFFT_VERSION_PATCH)
+    SHAFFT_VERSION_SUFFIX;
   return version;
 }
 

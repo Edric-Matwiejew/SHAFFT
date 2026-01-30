@@ -6,6 +6,8 @@ project(shafft
   LANGUAGES CXX            # HIP is enabled conditionally below for the HIP backend
 )
 
+set(SHAFFT_VERSION_SUFFIX "-alpha" CACHE STRING "version suffix")
+
 # C++17 standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

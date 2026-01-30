@@ -137,7 +137,7 @@ mpicxx -I/opt/shafft/include -L/opt/shafft/lib -lshafftc++ \
     -o test_shafft test_shafft.cpp
 
 ./test_shafft
-# Output: SHAFFT 0.0.1 (backend: FFTW)
+# Output: SHAFFT 0.0.1-alpha (backend: FFTW)
 ```
 
 ### Using SHAFFT in CMake Projects

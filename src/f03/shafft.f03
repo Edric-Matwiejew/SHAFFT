@@ -860,7 +860,7 @@ contains
       call c_shafftGetVersion(major, minor, patch)
    end subroutine shafftGetVersion
 
-   !> @brief Get the library version as a string (e.g., "0.0.1").
+   !> @brief Get the library version as a string (e.g., "0.0.1-alpha").
    !! @ingroup fortran_api
    !! @param[out] version Character string receiving the version.
    subroutine shafftGetVersionString(version)

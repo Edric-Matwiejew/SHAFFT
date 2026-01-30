@@ -542,7 +542,7 @@ const char* shafftGetBackendName(void);
 void shafftGetVersion(int* major, int* minor, int* patch);
 
 /**
- * @brief Get the library version as a string (e.g., "0.0.1").
+ * @brief Get the library version as a string (e.g., "0.0.1-alpha").
  * @ingroup c_api
  * @return Version string.
  */

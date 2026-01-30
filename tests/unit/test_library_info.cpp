@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <iostream>
 #include <sstream>
+#include <string>
 
 // Test result tracking
 static int g_passed = 0;
@@ -69,17 +70,22 @@ TEST(version_string_matches_components) {
         return false;
     }
     
-    // Build expected string
+    // Build expected numeric prefix
     char expected[64];
     snprintf(expected, sizeof(expected), "%d.%d.%d", v.major, v.minor, v.patch);
-    
-    if (std::strcmp(vstr, expected) != 0) {
-        std::cerr << "Version mismatch: getVersionString()='" << vstr 
-                  << "' but components give '" << expected << "'\n";
-        return false;
-    }
-    
-    return true;
+
+    const std::string prefix(expected);
+    const std::string actual(vstr);
+    const std::string suffix = SHAFFT_VERSION_SUFFIX;  // may be empty or start with '-'
+
+    // Accept exact match or numeric prefix + configured suffix
+    if (actual == prefix) return true;
+    if (!suffix.empty() && actual == prefix + suffix) return true;
+
+    std::cerr << "Version mismatch: getVersionString()='" << actual
+              << "' but components give '" << prefix
+              << "' (suffix='" << suffix << "')\n";
+    return false;
 }
 
 //------------------------------------------------------------------------------
@@ -154,17 +160,19 @@ TEST(version_string_format) {
         return false;
     }
     
-    // Rebuild and compare to ensure no extra content
+    // Allow optional suffix beginning with '-' after the numeric portion
     char rebuilt[64];
     snprintf(rebuilt, sizeof(rebuilt), "%d.%d.%d", major, minor, patch);
-    
-    if (std::strcmp(vstr, rebuilt) != 0) {
-        std::cerr << "Version string has extra content: '" << vstr 
-                  << "' vs rebuilt '" << rebuilt << "'\n";
-        return false;
-    }
-    
-    return true;
+
+    const std::string actual(vstr);
+    const std::string base(rebuilt);
+
+    if (actual == base) return true;
+    if (actual.rfind(base + "-", 0) == 0) return true; // base followed by '-' suffix
+
+    std::cerr << "Version string has unexpected content: '" << actual
+              << "' (expected '" << base << "' or base+'-suffix')\n";
+    return false;
 }
 
 //------------------------------------------------------------------------------
