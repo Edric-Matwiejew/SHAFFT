@@ -1,0 +1,15 @@
+*/bin/*
+build
+lib/*
+*.out
+core
+.DS_Store
+html
+latex
+*.h5
+results
+.vscode
+.cache
+.clangd
+*.md
+.venv

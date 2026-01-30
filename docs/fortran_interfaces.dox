@@ -1,0 +1,89 @@
+@defgroup fortran_interfaces Fortran Generic Interfaces
+@ingroup fortran_api
+@brief Generic interfaces that dispatch to precision-specific subroutines.
+
+These generic interfaces allow calling SHAFFT routines without specifying
+the precision suffix. The compiler selects the appropriate implementation
+based on argument types.
+
+@section plan_interface shafftPlan
+
+Create an FFT plan. Dispatches to:
+- shafftPlanNDA() - Use when number of distributed axes is known
+- shafftPlanCart() - Use when Cartesian decomposition dimensions are known
+
+@section buffer_interfaces Buffer Management Interfaces
+
+@subsection setbuffers shafftSetBuffers
+
+Attach data and work buffers to a plan. Dispatches to:
+- shafftSetBuffers_sp() - Single-precision complex
+- shafftSetBuffers_dp() - Double-precision complex
+
+The caller is responsible for allocation and lifetime of the buffers.
+Buffers must remain valid until the plan is destroyed or new buffers
+are attached. Internally, SHAFFT may swap the roles of data/work during
+execution, so use shafftGetBuffers() to determine which holds results
+after shafftExecute().
+
+@subsection getbuffers shafftGetBuffers
+
+Retrieve the plan's current data/work buffer pointers. Dispatches to:
+- shafftGetBuffers_sp() - Single-precision complex
+- shafftGetBuffers_dp() - Double-precision complex
+
+@warning Buffers may be swapped internally during execution. Call this
+routine <b>after</b> shafftExecute() to ensure that @c data points to the
+transformed results.
+
+@subsection allocbuffer shafftAllocBuffer
+
+Allocate a buffer suitable for the current backend. Dispatches to:
+- shafftAllocBuffer_sp() - Single-precision complex
+- shafftAllocBuffer_dp() - Double-precision complex
+
+Allocates device memory on GPU backends (hipFFT), host-aligned memory on
+CPU backends (FFTW). Use shafftFreeBuffer() to release.
+
+@subsection freebuffer shafftFreeBuffer
+
+Free a buffer allocated with shafftAllocBuffer(). Dispatches to:
+- shafftFreeBuffer_sp() - Single-precision complex
+- shafftFreeBuffer_dp() - Double-precision complex
+
+The buffer pointer is nullified after freeing.
+
+@subsection copytobuffer shafftCopyToBuffer
+
+Copy data from host memory to a SHAFFT buffer. Dispatches to:
+- shafftCopyToBuffer_sp() - Single-precision complex
+- shafftCopyToBuffer_dp() - Double-precision complex
+
+On GPU backends (hipFFT), performs host-to-device copy.
+On CPU backends (FFTW), performs memcpy.
+
+@subsection copyfrombuffer shafftCopyFromBuffer
+
+Copy data from a SHAFFT buffer to host memory. Dispatches to:
+- shafftCopyFromBuffer_sp() - Single-precision complex
+- shafftCopyFromBuffer_dp() - Double-precision complex
+
+On GPU backends (hipFFT), performs device-to-host copy.
+On CPU backends (FFTW), performs memcpy.
+
+@par Example Usage:
+@code{.f90}
+use shafft
+
+complex(c_float_complex), pointer :: data_buf(:), work_buf(:)
+
+! Allocate buffers (generic interface selects precision from pointer type)
+call shafftAllocBuffer(alloc_size, data_buf)
+call shafftAllocBuffer(alloc_size, work_buf)
+
+! Attach to plan
+call shafftSetBuffers(plan, data_buf, work_buf)
+
+! After execute, retrieve current buffer state
+call shafftGetBuffers(plan, alloc_size, data_buf, work_buf)
+@endcode

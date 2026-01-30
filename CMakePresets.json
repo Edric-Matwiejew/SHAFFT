@@ -1,0 +1,113 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "hipfft-release",
+      "displayName": "HIP/ROCm Release",
+      "description": "GPU backend using hipFFT (AMD ROCm or NVIDIA via HIP)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SHAFFT_ENABLE_HIPFFT": "ON",
+        "SHAFFT_ENABLE_FFTW": "OFF",
+        "SHAFFT_GPU_AWARE_MPI": "ON"
+      }
+    },
+    {
+      "name": "hipfft-debug",
+      "displayName": "HIP/ROCm Debug",
+      "description": "GPU backend with debug symbols",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SHAFFT_ENABLE_HIPFFT": "ON",
+        "SHAFFT_ENABLE_FFTW": "OFF",
+        "SHAFFT_GPU_AWARE_MPI": "ON"
+      }
+    },
+    {
+      "name": "hipfft-setonix",
+      "displayName": "HIP/ROCm for Setonix (Pawsey)",
+      "description": "Optimized for AMD MI250X on Setonix with Cray MPICH",
+      "inherits": "hipfft-release",
+      "cacheVariables": {
+        "SHAFFT_GPU_ARCHITECTURES": "gfx90a",
+        "SHAFFT_REQUIRE_GTL": "ON",
+        "SHAFFT_BUILD_FORTRAN": "ON"
+      }
+    },
+    {
+      "name": "fftw-release",
+      "displayName": "FFTW CPU Release",
+      "description": "CPU-only backend using FFTW3",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SHAFFT_ENABLE_HIPFFT": "OFF",
+        "SHAFFT_ENABLE_FFTW": "ON"
+      }
+    },
+    {
+      "name": "fftw-debug",
+      "displayName": "FFTW CPU Debug",
+      "description": "CPU-only backend with debug symbols",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SHAFFT_ENABLE_HIPFFT": "OFF",
+        "SHAFFT_ENABLE_FFTW": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "hipfft-release",
+      "configurePreset": "hipfft-release"
+    },
+    {
+      "name": "hipfft-debug",
+      "configurePreset": "hipfft-debug"
+    },
+    {
+      "name": "hipfft-setonix",
+      "configurePreset": "hipfft-setonix"
+    },
+    {
+      "name": "fftw-release",
+      "configurePreset": "fftw-release"
+    },
+    {
+      "name": "fftw-debug",
+      "configurePreset": "fftw-debug"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "fftw",
+      "configurePreset": "fftw-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "hipfft",
+      "configurePreset": "hipfft-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

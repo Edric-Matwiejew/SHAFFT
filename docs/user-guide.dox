@@ -1,0 +1,322 @@
+# User Guide {#user-guide}
+
+This guide covers the SHAFFT API, portable buffer management, and complete examples for C++, C, and Fortran.
+
+## Concepts
+
+### Slab Decomposition
+
+SHAFFT distributes N-dimensional tensors across MPI ranks using slab decomposition. The tensor is divided along one or more axes, with each rank owning a contiguous "slab" of the data.
+
+For a 3D tensor of shape `[Nx, Ny, Nz]` distributed across `P` ranks along axis 0:
+- Each rank owns approximately `Nx/P` slices
+- Each slice contains the full `Ny x Nz` plane
+
+### Plan-Based API
+
+SHAFFT uses a plan-based API similar to FFTW:
+
+1. **Create** a plan object
+2. **Initialize** with tensor shape, FFT type, and MPI communicator
+3. **Allocate** data and work buffers
+4. **Set** buffers on the plan
+5. **Execute** forward/backward transforms
+6. **Normalize** after inverse transform (optional)
+7. **Release** resources
+
+### Buffer Requirements
+
+SHAFFT requires two separate buffers of equal size:
+- **Data buffer**: Holds input/output data
+- **Work buffer**: Used for internal transpositions and communication
+
+The required size (in elements) is returned by `allocSize()` and may be larger than the tensor size due to padding for efficient MPI communication.
+
+## Portable Buffer API
+
+SHAFFT provides portable buffer management functions that automatically use the correct memory type for the active backend:
+
+| C++ Function | C Function | Fortran Subroutine | Description |
+|--------------|------------|-------------------|-------------|
+| `shafft::allocBuffer(n, &ptr)` | `shafftAllocBufferF/D(n, &ptr)` | `shafftAllocBuffer(n, ptr)` | Allocate buffer (device memory on GPU, host on CPU) |
+| `shafft::freeBuffer(ptr)` | `shafftFreeBufferF/D(ptr)` | `shafftFreeBuffer(ptr)` | Free buffer |
+| `shafft::copyToBuffer(dst, src, n)` | `shafftCopyToBufferF/D(dst, src, n)` | `shafftCopyToBuffer(dst, src, n)` | Copy from host array to buffer |
+| `shafft::copyFromBuffer(dst, src, n)` | `shafftCopyFromBufferF/D(dst, src, n)` | `shafftCopyFromBuffer(dst, src, n)` | Copy from buffer to host array |
+
+**Notes:**
+- C API: `F` suffix is for single precision (complexf), `D` for double precision (complexd)
+- Fortran: Generic interfaces automatically select precision based on argument types
+
+Using these functions allows writing code that works unchanged on both GPU and CPU backends.
+
+## Runtime Queries
+
+```cpp
+// C++
+const char* backend = shafft::getBackendName();  // "FFTW" or "hipFFT"
+shafft::Version v = shafft::getVersion();
+printf("SHAFFT %d.%d.%d\n", v.major, v.minor, v.patch);
+```
+
+```c
+// C
+const char* backend = shafftBackendName();
+int major, minor, patch;
+shafftVersion(&major, &minor, &patch);
+```
+
+```fortran
+! Fortran
+character(len=32) :: backend_name, version_str
+integer :: major, minor, patch
+
+call shafftGetBackendName(backend_name)
+call shafftGetVersion(major, minor, patch)
+call shafftGetVersionString(version_str)
+```
+
+## C++ API
+
+The C++ API provides the `shafft::Plan` class with member functions.
+
+### Complete Example
+
+```cpp
+#include <shafft/shafft.hpp>
+#include <mpi.h>
+#include <vector>
+#include <cstdio>
+
+int main(int argc, char** argv) {
+    MPI_Init(&argc, &argv);
+    
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    
+    // Create and initialize plan
+    shafft::Plan plan;
+    std::vector<int> shape = {64, 64, 32};
+    plan.init(1, shape, shafft::FFTType::C2C, MPI_COMM_WORLD);
+    
+    // Allocate buffers using portable API
+    size_t alloc_size = plan.allocSize();
+    shafft::complexf *data, *work;
+    shafft::allocBuffer(alloc_size, &data);
+    shafft::allocBuffer(alloc_size, &work);
+    
+    // Initialize data (example: all ones)
+    std::vector<shafft::complexf> host_data(alloc_size, {1.0f, 0.0f});
+    shafft::copyToBuffer(data, host_data.data(), alloc_size);
+    
+    // Set buffers and execute
+    plan.setBuffers(data, work);
+    plan.execute(shafft::FFTDirection::FORWARD);
+    
+    // Inverse transform
+    plan.execute(shafft::FFTDirection::BACKWARD);
+    plan.normalize();  // Scale by 1/N
+    
+    // Copy result back to host
+    shafft::copyFromBuffer(host_data.data(), data, alloc_size);
+    
+    if (rank == 0) {
+        printf("Result[0] = (%f, %f)\n", 
+               host_data[0].real(), host_data[0].imag());
+    }
+    
+    // Cleanup (must call before MPI_Finalize)
+    plan.release();
+    shafft::freeBuffer(data);
+    shafft::freeBuffer(work);
+    
+    MPI_Finalize();
+    return 0;
+}
+```
+
+### Key C++ Types
+
+| Type | Description |
+|------|-------------|
+| `shafft::Plan` | FFT plan class |
+| `shafft::complexf` | Single-precision complex (`std::complex<float>`) |
+| `shafft::complexd` | Double-precision complex (`std::complex<double>`) |
+| `shafft::FFTType::C2C` | Single-precision complex-to-complex |
+| `shafft::FFTType::Z2Z` | Double-precision complex-to-complex |
+| `shafft::FFTDirection::FORWARD` | Forward transform |
+| `shafft::FFTDirection::BACKWARD` | Backward (inverse) transform |
+
+## C API
+
+The C API uses opaque plan handles.
+
+### Complete Example
+
+```c
+#include <shafft/shafft.h>
+#include <mpi.h>
+#include <stdio.h>
+#include <complex.h>
+
+int main(int argc, char** argv) {
+    MPI_Init(&argc, &argv);
+    
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    
+    // Create plan
+    void* plan;
+    shafftPlanCreate(&plan);
+    
+    // Initialize
+    int dims[] = {64, 64, 32};
+    shafftPlanNDA(plan, 3, 1, dims, SHAFFT_C2C, MPI_COMM_WORLD);
+    
+    // Allocate buffers
+    size_t alloc_size;
+    shafftGetAllocSize(plan, &alloc_size);
+    
+    void *data, *work;
+    shafftAllocBufferF(alloc_size, &data);
+    shafftAllocBufferF(alloc_size, &work);
+    
+    // Initialize data on host and copy to buffer
+    float complex* host_data = malloc(alloc_size * sizeof(float complex));
+    for (size_t i = 0; i < alloc_size; i++) {
+        host_data[i] = 1.0f + 0.0f * I;
+    }
+    shafftCopyToBufferF(data, host_data, alloc_size);
+    
+    // Execute transforms
+    shafftSetBuffers(plan, data, work);
+    shafftExecute(plan, SHAFFT_FORWARD);
+    shafftExecute(plan, SHAFFT_BACKWARD);
+    shafftNormalize(plan);
+    
+    // Copy result back
+    shafftCopyFromBufferF(host_data, data, alloc_size);
+    
+    if (rank == 0) {
+        printf("Result[0] = (%f, %f)\n", 
+               crealf(host_data[0]), cimagf(host_data[0]));
+    }
+    
+    // Cleanup
+    shafftDestroy(&plan);
+    shafftFreeBufferF(data);
+    shafftFreeBufferF(work);
+    free(host_data);
+    
+    MPI_Finalize();
+    return 0;
+}
+```
+
+### Key C Constants
+
+| Constant | Description |
+|----------|-------------|
+| `SHAFFT_C2C` | Single-precision complex-to-complex |
+| `SHAFFT_Z2Z` | Double-precision complex-to-complex |
+| `SHAFFT_FORWARD` | Forward transform |
+| `SHAFFT_BACKWARD` | Backward (inverse) transform |
+
+## Fortran API
+
+The Fortran API uses a module interface with portable buffer management.
+
+### Complete Example
+
+```fortran
+program example_f03
+  use iso_c_binding
+  use mpi_f08
+  use shafft
+  implicit none
+
+  type(c_ptr) :: plan
+  integer :: ierr, rank
+  integer(c_int) :: dims(3) = [64, 64, 32]
+  integer(c_size_t) :: alloc_size
+  complex(c_double), pointer :: data(:) => null()
+  complex(c_double), pointer :: work(:) => null()
+  complex(c_double), allocatable :: host_data(:)
+
+  call MPI_Init(ierr)
+  call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
+
+  ! Initialize plan (double precision Z2Z)
+  call shafftPlanNDA(plan, 3, 1, dims, SHAFFT_Z2Z, MPI_COMM_WORLD%MPI_VAL)
+
+  ! Get allocation size and allocate buffers
+  call shafftGetAllocSize(plan, alloc_size)
+  call shafftAllocBuffer(alloc_size, data)
+  call shafftAllocBuffer(alloc_size, work)
+
+  ! Initialize host data and copy to buffer
+  allocate(host_data(alloc_size))
+  host_data = (1.0d0, 0.0d0)
+  call shafftCopyToBuffer(data, host_data, alloc_size)
+
+  ! Execute transforms
+  call shafftSetBuffers(plan, data, work)
+  call shafftExecute(plan, SHAFFT_FORWARD)
+  call shafftExecute(plan, SHAFFT_BACKWARD)
+  call shafftNormalize(plan)
+
+  ! Get current buffers (may have been swapped) and copy result back
+  call shafftGetBuffers(plan, alloc_size, data, work)
+  call shafftCopyFromBuffer(host_data, data, alloc_size)
+
+  if (rank == 0) then
+    print '(A,2F10.4)', 'Result[1] = ', host_data(1)
+  end if
+
+  ! Cleanup
+  call shafftDestroy(plan)
+  call shafftFreeBuffer(data)
+  call shafftFreeBuffer(work)
+  deallocate(host_data)
+
+  call MPI_Finalize(ierr)
+end program
+```
+
+### Key Fortran Subroutines
+
+| Subroutine | Description |
+|------------|-------------|
+| `shafftPlanNDA(plan, ndim, nda, dims, type, comm)` | Create plan with NDA decomposition |
+| `shafftPlanCart(plan, ndim, comm_dims, dims, type, comm)` | Create plan with Cartesian decomposition |
+| `shafftGetAllocSize(plan, alloc_size)` | Get required buffer allocation size |
+| `shafftAllocBuffer(n, ptr)` | Allocate buffer (precision auto-detected) |
+| `shafftFreeBuffer(ptr)` | Free buffer |
+| `shafftCopyToBuffer(dst, src, n)` | Copy host array to buffer |
+| `shafftCopyFromBuffer(dst, src, n)` | Copy buffer to host array |
+| `shafftSetBuffers(plan, data, work)` | Set data and work buffers |
+| `shafftGetBuffers(plan, n, data, work)` | Get current buffer pointers |
+| `shafftExecute(plan, direction)` | Execute FFT |
+| `shafftNormalize(plan)` | Normalize after inverse FFT |
+| `shafftDestroy(plan)` | Release plan resources |
+
+### Key Fortran Constants
+
+| Constant | Description |
+|----------|-------------|
+| `SHAFFT_C2C` | Single-precision complex-to-complex |
+| `SHAFFT_Z2Z` | Double-precision complex-to-complex |
+| `SHAFFT_FORWARD` | Forward transform |
+| `SHAFFT_BACKWARD` | Backward (inverse) transform |
+
+## Limitations
+
+- **1D tensors**: Cannot be distributed across MPI ranks. For 1D FFTs with multiple ranks, each rank computes independently.
+- **Contiguous axes**: At least one axis must remain contiguous (non-distributed).
+- **Transform types**: Only complex-to-complex (C2C/Z2Z) transforms are currently supported.
+
+See the @ref limitations page for complete details.
+
+## See Also
+
+- @ref decomposition - Understanding decomposition modes and planning options
+- @ref tensor-layout - How tensors are distributed and how layouts change during transforms

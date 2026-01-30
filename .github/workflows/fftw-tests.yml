@@ -1,0 +1,39 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  fftw:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake build-essential \
+            libfftw3-dev libfftw3-mpi-dev \
+            libopenmpi-dev openmpi-bin
+
+      - name: Configure (FFTW backend)
+        run: |
+          cmake -S . -B build \
+            -DSHAFFT_ENABLE_HIPFFT=OFF \
+            -DSHAFFT_ENABLE_FFTW=ON \
+            -DBUILD_TESTING=ON \
+            -DMPIEXEC_PREFLAGS=--oversubscribe
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        env:
+          OMP_NUM_THREADS: 1
+        run: ctest --test-dir build --output-on-failure

@@ -1,0 +1,219 @@
+# Linking Guide {#linking-guide}
+
+This guide covers how to compile and link programs that use SHAFFT.
+
+## Overview
+
+Each SHAFFT language interface is self-contained - you only need to link against one SHAFFT library:
+
+| Interface | Library | Header/Module |
+|-----------|---------|---------------|
+| C++ | `libshafftc++` | `shafft.hpp` |
+| C | `libshafftc` | `shafft.h` |
+| Fortran | `libshafftf03` | `shafft.mod` |
+
+In addition to the SHAFFT library, you must link the backend dependencies (FFTW or HIP/hipFFT) and MPI.
+
+## Using CMake (Recommended)
+
+SHAFFT provides CMake package configuration files for easy integration. Simply use `find_package()`:
+
+```cmake
+cmake_minimum_required(VERSION 3.21)
+project(my_fft_app)
+
+# Find SHAFFT (automatically finds backend dependencies)
+find_package(shafft REQUIRED)
+find_package(MPI REQUIRED)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE shafft::shafftc++ MPI::MPI_CXX)
+```
+
+Configure your project with the SHAFFT install path:
+
+```bash
+cmake -DCMAKE_PREFIX_PATH=/opt/shafft ..
+```
+
+The `shafft::shafftc++`, `shafft::shafftc`, and `shafft::shafftf03` targets automatically include all necessary dependencies (backend libraries, include paths, compile definitions, etc.).
+
+### Available Targets
+
+| Target | Description |
+|--------|-------------|
+| `shafft::shafftc++` | C++ interface |
+| `shafft::shafftc` | C interface |
+| `shafft::shafftf03` | Fortran interface (if built with `SHAFFT_BUILD_FORTRAN=ON`) |
+
+### Checking Backend at Configure Time
+
+You can query which backend SHAFFT was built with:
+
+```cmake
+find_package(shafft REQUIRED)
+
+if(SHAFFT_BACKEND_HIPFFT)
+  message(STATUS "SHAFFT using HIPFFT backend")
+elseif(SHAFFT_BACKEND_FFTW)
+  message(STATUS "SHAFFT using FFTW backend")
+endif()
+```
+
+## Manual Compilation
+
+Replace `/opt/shafft` with your installation prefix in all examples below.
+
+### FFTW Backend
+
+#### C++
+
+```bash
+mpicxx -fopenmp -I/opt/shafft/include \
+    -L/opt/shafft/lib -lshafftc++ \
+    -lfftw3 -lfftw3f -lfftw3_threads \
+    -o my_program my_program.cpp
+```
+
+#### C
+
+```bash
+mpicc -fopenmp -I/opt/shafft/include \
+    -L/opt/shafft/lib -lshafftc \
+    -lfftw3 -lfftw3f -lfftw3_threads -lm \
+    -o my_program my_program.c
+```
+
+#### Fortran
+
+```bash
+mpifort -fopenmp -I/opt/shafft/include \
+    -L/opt/shafft/lib -lshafftf03 \
+    -lfftw3 -lfftw3f -lfftw3_threads \
+    -o my_program my_program.f03
+```
+
+### hipFFT Backend
+
+For GPU builds, programs must also link against hipFFT and the HIP runtime.
+
+#### C++
+
+```bash
+hipcc -I/opt/shafft/include -I$ROCM_PATH/include \
+    -L/opt/shafft/lib -lshafftc++ \
+    -L$ROCM_PATH/lib -lamdhip64 -lhipfft \
+    $(mpicxx --showme:compile) $(mpicxx --showme:link) \
+    -o my_program my_program.cpp
+```
+
+#### C
+
+```bash
+mpicc -I/opt/shafft/include \
+    -L/opt/shafft/lib -lshafftc \
+    -L$ROCM_PATH/lib -lamdhip64 -lhipfft -lm \
+    -o my_program my_program.c
+```
+
+#### Fortran
+
+```bash
+mpifort -I/opt/shafft/include \
+    -L/opt/shafft/lib -lshafftf03 \
+    -L$ROCM_PATH/lib -lamdhip64 -lhipfft \
+    -o my_program my_program.f03
+```
+
+## Runtime Library Path
+
+If the SHAFFT library is not in a standard location, set the runtime library path.
+
+### Environment Variable
+
+```bash
+export LD_LIBRARY_PATH=/opt/shafft/lib:$LD_LIBRARY_PATH
+```
+
+### Compile-Time RPATH
+
+```bash
+mpicxx -Wl,-rpath,/opt/shafft/lib ...
+```
+
+### CMake RPATH
+
+```cmake
+set_target_properties(myapp PROPERTIES
+    INSTALL_RPATH "${SHAFFT_PATH}/lib"
+    BUILD_WITH_INSTALL_RPATH TRUE
+)
+```
+
+## Troubleshooting
+
+### Undefined Symbols
+
+If you see undefined symbol errors at link time:
+
+1. **Check library order**: Libraries must be listed after the objects that use them
+2. **Verify backend libraries**: Ensure FFTW or HIP libraries are linked
+3. **Check library path**: Use `ldd` (Linux) or `otool -L` (macOS) to verify library resolution
+
+```bash
+ldd ./my_program | grep -E "shafft|fftw|hip"
+```
+
+### Missing Headers
+
+If headers are not found:
+
+```bash
+# Check include path (headers are in shafft/ subdirectory)
+ls /opt/shafft/include/shafft/
+# Should contain: shafft.h shafft.hpp shafft_config.h shafft_types.hpp shafft_error.hpp
+```
+
+### Fortran Module Not Found
+
+The Fortran module file must be in the include path:
+
+```bash
+ls /opt/shafft/include/shafft.mod
+```
+
+If using a different compiler than the one used to build SHAFFT, you may need to rebuild SHAFFT with your compiler (Fortran `.mod` files are compiler-specific).
+
+## Backend-Specific Notes
+
+### FFTW Threading
+
+The FFTW backend requires a threading library. If you see errors about `fftw3_threads`:
+
+```bash
+# Check which threading library is available
+pkg-config --libs fftw3_threads   # pthreads version
+pkg-config --libs fftw3_omp       # OpenMP version
+```
+
+Link the one that matches your FFTW installation.
+
+### hipFFT with MPI
+
+When using `hipcc` with MPI, extract the MPI flags separately:
+
+```bash
+# Get MPI compile flags
+mpicxx --showme:compile   # e.g., -I/usr/include/openmpi
+
+# Get MPI link flags  
+mpicxx --showme:link      # e.g., -L/usr/lib -lmpi_cxx -lmpi
+```
+
+For GPU-aware MPI (recommended for performance), ensure your MPI is built with GPU support and the GPU transport layer (GTL) is available.
+
+## See Also
+
+- @ref getting-started - Build and installation
+- @ref backends - Backend-specific configuration
+- @ref user-guide - API usage and examples

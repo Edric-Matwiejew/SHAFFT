@@ -1,0 +1,172 @@
+# Getting Started {#getting-started}
+
+This guide covers installation and build options for SHAFFT.
+
+## Requirements
+
+### Core Requirements
+
+| Requirement | Minimum Version | Notes |
+|-------------|-----------------|-------|
+| CMake | 3.21 | Build system |
+| MPI | Any | OpenMPI, MPICH, Cray MPICH, etc. |
+| C++ Compiler | GCC 10+ | Must support C++17 |
+
+**Note:** Version numbers indicate the development environment; other versions may also be compatible.
+
+### Backend Requirements
+
+See @ref backends for backend-specific requirements.
+
+## Build Configuration
+
+### Configuration Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `SHAFFT_ENABLE_HIPFFT` | Enable GPU/hipFFT backend | `ON` |
+| `SHAFFT_ENABLE_FFTW` | Enable CPU/FFTW backend | `OFF` |
+| `SHAFFT_BUILD_FORTRAN` | Build Fortran interface | `OFF` |
+| `SHAFFT_BUILD_EXAMPLES` | Build example programs | `OFF` |
+| `BUILD_TESTING` | Build test suite | `ON` |
+| `SHAFFT_GPU_ARCHITECTURES` | GPU architectures (e.g., `gfx90a`) | Auto-detect |
+| `SHAFFT_GPU_AWARE_MPI` | Use GPU-aware MPI | `ON` |
+| `CMAKE_INSTALL_PREFIX` | Installation directory | `/usr/local` |
+
+**Note:** Enabling one backend automatically disables the other.
+
+### Using CMake Presets
+
+SHAFFT provides CMake presets for common configurations:
+
+```bash
+# List available presets
+cmake --list-presets
+
+# Configure and build with a preset
+cmake --preset fftw-release
+cmake --build --preset fftw-release
+```
+
+### FFTW Backend Build
+
+```bash
+cmake -B build -S . \
+    -DSHAFFT_ENABLE_HIPFFT=OFF \
+    -DSHAFFT_ENABLE_FFTW=ON \
+    -DSHAFFT_BUILD_FORTRAN=ON \
+    -DCMAKE_INSTALL_PREFIX=/opt/shafft
+
+cmake --build build --target install
+```
+
+### hipFFT Backend Build (AMD GPU)
+
+```bash
+cmake -B build -S . \
+    -DSHAFFT_ENABLE_HIPFFT=ON \
+    -DSHAFFT_ENABLE_FFTW=OFF \
+    -DHIP_PLATFORM=amd \
+    -DOFFLOAD_ARCH=gfx90a \
+    -DSHAFFT_BUILD_FORTRAN=ON \
+    -DCMAKE_INSTALL_PREFIX=/opt/shafft
+
+cmake --build build --target install
+```
+
+### hipFFT Backend Build (NVIDIA GPU)
+
+```bash
+cmake -B build -S . \
+    -DSHAFFT_ENABLE_HIPFFT=ON \
+    -DSHAFFT_ENABLE_FFTW=OFF \
+    -DHIP_PLATFORM=nvidia \
+    -DCUDA_PATH=/usr/local/cuda \
+    -DOFFLOAD_ARCH=sm_86 \
+    -DCMAKE_INSTALL_PREFIX=/opt/shafft
+
+cmake --build build --target install
+```
+
+See @ref backends for all backend-specific build options, including how to enable or disable GPU-aware MPI support (`SHAFFT_GPU_AWARE_MPI` option) and host-staging fallback for non-GPU-aware MPI systems.
+
+## Verifying Installation
+
+After installation, verify the libraries are present:
+
+```bash
+ls /opt/shafft/lib/
+# Should show: libshafftc++.so  libshafftc.so  libshafftf03.so (if Fortran enabled)
+
+ls /opt/shafft/include/shafft/
+# Should show: shafft.h  shafft.hpp  shafft_config.h  shafft_types.hpp  shafft_error.hpp
+
+# If Fortran enabled:
+ls /opt/shafft/include/
+# Should also show: shafft.mod
+```
+
+## First Program
+
+Create a simple test program:
+
+```cpp
+// test_shafft.cpp
+#include <shafft/shafft.hpp>
+#include <mpi.h>
+#include <cstdio>
+
+int main(int argc, char** argv) {
+    MPI_Init(&argc, &argv);
+    
+    // Print version and backend
+    shafft::Version v = shafft::getVersion();
+    printf("SHAFFT %d.%d.%d (backend: %s)\n", 
+           v.major, v.minor, v.patch, shafft::getBackendName());
+    
+    MPI_Finalize();
+    return 0;
+}
+```
+
+Compile and run (FFTW backend example):
+
+```bash
+mpicxx -I/opt/shafft/include -L/opt/shafft/lib -lshafftc++ \
+    -lfftw3 -lfftw3f -lfftw3_threads -fopenmp \
+    -o test_shafft test_shafft.cpp
+
+./test_shafft
+# Output: SHAFFT 0.0.1 (backend: FFTW)
+```
+
+### Using SHAFFT in CMake Projects
+
+For CMake-based projects, use `find_package()`:
+
+```cmake
+cmake_minimum_required(VERSION 3.21)
+project(my_fft_app)
+
+find_package(shafft REQUIRED)
+find_package(MPI REQUIRED)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE shafft::shafftc++ MPI::MPI_CXX)
+```
+
+Configure with the SHAFFT install path:
+
+```bash
+cmake -DCMAKE_PREFIX_PATH=/opt/shafft ..
+```
+
+The `shafft::shafftc++` and `shafft::shafftc` targets automatically include all necessary dependencies (backend libraries, include paths, etc.).
+
+See @ref linking-guide for complete compilation instructions.
+
+## Next Steps
+
+- @ref user-guide - Learn the API and see examples for all languages
+- @ref linking-guide - Detailed compile and link instructions
+- @ref backends - Backend-specific configuration and tuning

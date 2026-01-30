@@ -1,0 +1,41 @@
+# Limitations {#limitations}
+
+SHAFFT is designed for distributed multi-dimensional FFTs. The current version has the following limitations.
+
+## Dimensional Constraints
+
+### 1D Tensors
+
+1D tensors (single axis) can only be processed with a single MPI rank. When using multiple ranks with a 1D tensor, `shafftPlanNDA()` and `shafftPlanCart()` (or the C++ equivalents) will return `SHAFFT_ERR_INVALID_DECOMP`.
+
+This is because slab decomposition requires at least one non-distributed axis for local computation, which is not possible with only one dimension.
+
+## Transform Types
+
+Currently only complex-to-complex (C2C/Z2Z) transforms are supported:
+
+| Precision | C Constant | C++ Type |
+|-----------|------------|----------|
+| Single | `SHAFFT_C2C` | `shafft::FFTType::C2C` |
+| Double | `SHAFFT_Z2Z` | `shafft::FFTType::Z2Z` |
+
+Real-to-complex (R2C) and complex-to-real (C2R) transforms are not yet supported.
+
+## Memory Requirements
+
+SHAFFT requires two separate buffers (data and work) of equal size for out-of-place transforms and internal transpositions. The required size is returned by `allocSize()` and includes padding for efficient communication.
+
+```cpp
+shafft::Plan plan;
+plan.init(1, {64, 64, 64}, shafft::FFTType::C2C, MPI_COMM_WORLD);
+
+size_t n = plan.allocSize();  // Elements needed per buffer
+shafft::complexf *data, *work;
+shafft::allocBuffer(n, &data);
+shafft::allocBuffer(n, &work);
+```
+
+## See Also
+
+- @ref user-guide - API usage and examples
+- @ref backends - Backend-specific configuration

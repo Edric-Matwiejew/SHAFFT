@@ -1,0 +1,190 @@
+# Decomposition and Planning {#decomposition}
+
+This guide explains how to configure tensor decomposition and create FFT plans in SHAFFT.
+
+## Overview
+
+SHAFFT provides a two-step workflow for setting up distributed FFTs:
+
+1. **Configuration**: Query or specify the decomposition parameters
+2. **Planning**: Create an FFT plan using those parameters
+
+This separation allows you to inspect the decomposition before committing resources, which is useful for:
+- Validating that your tensor fits in available memory
+- Understanding how data will be distributed across ranks
+- Handling inactive ranks gracefully
+
+## API Variants
+
+SHAFFT provides two complementary APIs for decomposition:
+
+| API | Input | Use Case |
+|-----|-------|----------|
+| **NDA** (configurationNDA, planNDA) | Number of distributed axes | "Distribute over N axes, let library choose the grid" |
+| **Cart** (configurationCart, planCart) | Explicit process grid | "Use this exact grid configuration" |
+
+Both produce the same result: a Cartesian process grid (`COMM_DIMS`) that defines how the tensor is partitioned.
+
+## NDA API
+
+The NDA API specifies *how many* axes to distribute, leaving the grid factorization to the library.
+
+### Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `nda = 0` | **Auto mode**: Library selects optimal number of distributed axes |
+| `nda > 0` | **Explicit mode**: Use exactly this many distributed axes |
+
+### Example (C++)
+
+```cpp
+std::vector<int> dims = {128, 128, 64};
+int nda = 2;  // Distribute over 2 axes
+
+std::vector<int> subsize(3), offset(3), COMM_DIMS(3);
+shafft::configurationNDA(dims, nda, subsize, offset, COMM_DIMS,
+                         shafft::FFTType::C2C, 0, MPI_COMM_WORLD);
+
+// Now nda, subsize, offset, COMM_DIMS contain the decomposition
+// Create plan using the same nda value:
+shafft::Plan plan;
+plan.init(nda, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
+```
+
+## Cart API
+
+The Cart API specifies the exact process grid, giving full control over decomposition.
+
+### Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `COMM_DIMS` all zeros | **Auto mode**: Library computes optimal grid |
+| `COMM_DIMS` non-zero | **Explicit mode**: Use this exact grid |
+
+### Grid Structure
+
+The grid must follow a "slab prefix" structure:
+- Leading entries (indices 0..d-1) may be > 1
+- Trailing entries (indices d..ndim-1) must be 1
+- No gaps allowed (e.g., `[2, 1, 4]` is invalid)
+
+### Example (C++)
+
+```cpp
+std::vector<int> dims = {128, 128, 64};
+std::vector<int> COMM_DIMS = {4, 2, 1};  // 8 ranks total
+
+std::vector<int> subsize(3), offset(3);
+int COMM_SIZE;
+shafft::configurationCart(dims, subsize, offset, COMM_DIMS, COMM_SIZE,
+                          shafft::FFTType::C2C, 0, MPI_COMM_WORLD);
+
+// Create plan using COMM_DIMS:
+shafft::Plan plan;
+plan.init(COMM_DIMS, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
+```
+
+## Memory Limit Parameter
+
+Both configuration functions accept a `mem_limit` parameter that controls the selection strategy:
+
+| Value | Mode | Behavior |
+|-------|------|----------|
+| `mem_limit > 0` | want_max + enforce | Maximize distribution; fail if local size exceeds limit |
+| `mem_limit = 0` | want_max | Maximize distribution (more axes = smaller local blocks) |
+| `mem_limit < 0` | want_min | Minimize distribution (fewer axes = less communication) |
+
+### When to Use Each Mode
+
+- **want_max** (`mem_limit >= 0`): Default choice. Distributes across more axes for smaller per-rank memory footprint. Good for large tensors or memory-constrained systems.
+
+- **want_min** (`mem_limit < 0`): Use when communication overhead dominates. Fewer distributed axes means fewer all-to-all operations during the FFT.
+
+- **Enforced limit** (`mem_limit > 0`): Use when you have a hard memory budget. The function fails if no decomposition fits within the limit.
+
+## Auto vs Explicit Mode
+
+| Aspect | Auto Mode | Explicit Mode |
+|--------|-----------|---------------|
+| Input | `nda=0` or `COMM_DIMS` all zeros | `nda>0` or `COMM_DIMS` non-zero |
+| Grid selection | Library optimizes | User specifies exactly |
+| On constraint violation | Tries alternatives | Fails immediately |
+| Use case | General usage | Reproducibility, specific communication patterns |
+
+**Important**: In explicit mode, the function fails rather than silently adjusting your specification. This ensures predictable behavior when you need a specific configuration.
+
+## Inactive Ranks
+
+When the process grid product is less than the total MPI ranks, some ranks become *inactive*:
+
+```cpp
+// 6 MPI ranks, but grid is [2, 2, 1] = 4 active ranks
+// Ranks 4 and 5 become inactive
+```
+
+Inactive ranks are handled gracefully:
+- `configurationNDA`/`configurationCart` succeed with zero-sized local blocks
+- `planNDA`/`planCart` succeed
+- `execute()` and `normalize()` become no-ops
+- `isActive()` returns `false`
+- `allocSize()` returns 0
+
+A warning is printed to stderr when ranks become inactive. This is normal and expected when the tensor size doesn't evenly divide across all ranks.
+
+## Complete Workflow
+
+```cpp
+#include <shafft/shafft.hpp>
+#include <mpi.h>
+
+int main(int argc, char** argv) {
+    MPI_Init(&argc, &argv);
+    
+    std::vector<int> dims = {256, 256, 128};
+    
+    // Step 1: Query decomposition
+    int nda = 0;  // Auto mode
+    std::vector<int> subsize(3), offset(3), COMM_DIMS(3);
+    
+    int rc = shafft::configurationNDA(dims, nda, subsize, offset, COMM_DIMS,
+                                       shafft::FFTType::C2C, 0, MPI_COMM_WORLD);
+    if (rc != 0) { /* handle error */ }
+    
+    // Step 2: Create plan
+    shafft::Plan plan;
+    plan.init(nda, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
+    
+    // Step 3: Allocate and set buffers
+    size_t alloc_size = plan.allocSize();
+    shafft::complexf *data, *work;
+    shafft::allocBuffer(alloc_size, &data);
+    shafft::allocBuffer(alloc_size, &work);
+    plan.setBuffers(data, work);
+    
+    // Step 4: Execute transforms
+    plan.execute(shafft::FFTDirection::FORWARD);
+    plan.execute(shafft::FFTDirection::BACKWARD);
+    plan.normalize();
+    
+    // Step 5: Cleanup
+    plan.release();
+    shafft::freeBuffer(data);
+    shafft::freeBuffer(work);
+    
+    MPI_Finalize();
+    return 0;
+}
+```
+
+## Function Reference
+
+| Function | Purpose |
+|----------|---------|
+| `configurationNDA` | Query/compute NDA decomposition |
+| `configurationCart` | Query/compute Cartesian decomposition |
+| `planNDA` / `Plan::init(nda, ...)` | Create plan from NDA specification |
+| `planCart` / `Plan::init(COMM_DIMS, ...)` | Create plan from Cartesian grid |
+
+See the @ref cpp_api, @ref c_api, or @ref fortran_api reference for detailed parameter documentation.

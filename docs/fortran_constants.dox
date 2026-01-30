@@ -1,0 +1,45 @@
+@defgroup fortran_constants Fortran Constants
+@ingroup fortran_api
+@brief Integer parameter constants for the Fortran API.
+
+These constants are defined in the @c shafft module and should be used
+with the corresponding Fortran subroutines.
+
+@section fft_type_constants FFT Type Constants
+
+| Constant     | Value | Description                              |
+|--------------|-------|------------------------------------------|
+| @c SHAFFT_C2C | 0     | Single-precision complex-to-complex FFT  |
+| @c SHAFFT_Z2Z | 1     | Double-precision complex-to-complex FFT  |
+
+@section direction_constants Transform Direction Constants
+
+| Constant          | Value | Description                |
+|-------------------|-------|----------------------------|
+| @c SHAFFT_FORWARD  | 0     | Forward FFT transform      |
+| @c SHAFFT_BACKWARD | 1     | Backward (inverse) FFT     |
+
+@section layout_constants Tensor Layout Constants
+
+Used with shafftGetLayout() and shafftGetAxes() to query tensor layout
+at different stages of the transform.
+
+| Constant                         | Value | Description                                    |
+|----------------------------------|-------|------------------------------------------------|
+| @c SHAFFT_TENSOR_LAYOUT_CURRENT     | 0     | Current layout (initial or transformed)        |
+| @c SHAFFT_TENSOR_LAYOUT_INITIAL     | 1     | Layout before any transforms                   |
+| @c SHAFFT_TENSOR_LAYOUT_TRANSFORMED | 2     | Layout after forward/backward transform        |
+
+@par Example Usage:
+@code{.f90}
+use shafft
+
+! Create a double-precision plan
+call shafftPlanNDA(plan, ndim, nda, dims, SHAFFT_Z2Z, MPI_COMM_WORLD)
+
+! Execute forward transform
+call shafftExecute(plan, SHAFFT_FORWARD)
+
+! Query transformed layout
+call shafftGetLayout(plan, subsize, offset, SHAFFT_TENSOR_LAYOUT_TRANSFORMED)
+@endcode

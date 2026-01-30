@@ -1,0 +1,26 @@
+@defgroup cpp_api C++
+@brief C++ interface for SHAFFT.
+
+The C++ interface provides both a Plan class with member functions and
+procedural free functions. The portable complex types shafft::complexf 
+and shafft::complexd work with both FFTW and hipFFT backends.
+
+@see shafft::Plan for the class-based interface.
+@see shafft.hpp for the complete C++ API.
+
+@defgroup c_api C
+@brief C interface for SHAFFT.
+
+The C interface provides procedural functions for plan creation, execution,
+and resource management. Suitable for integration with C code or when
+object-oriented features are not needed.
+
+@see shafft.h for the complete C API.
+
+@defgroup fortran_api Fortran
+@brief Fortran 2003 interface for SHAFFT.
+
+The Fortran interface wraps the C API with Fortran-native types and calling
+conventions using ISO_C_BINDING.
+
+@see shafft.f03 for the complete Fortran API.

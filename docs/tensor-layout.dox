@@ -1,0 +1,224 @@
+# Tensor Layout {#tensor-layout}
+
+This guide explains how SHAFFT distributes tensors across MPI ranks, how the layout changes during transforms, and how to query layout information for your computations.
+
+## Overview
+
+SHAFFT uses slab decomposition to distribute N-dimensional tensors across MPI ranks. In this approach:
+
+- The tensor is divided along one or more axes (the distributed axes)
+- Each rank owns a contiguous "slab" of data
+- The remaining axes stay local to each rank (the contiguous axes)
+
+Understanding the tensor layout is essential for:
+- Initializing input data correctly
+- Processing output data after transforms
+- Performing element-wise operations on distributed data
+
+## Memory Layout
+
+SHAFFT uses row-major (C-style) memory ordering. For a 3D tensor with dimensions `[Nx, Ny, Nz]`:
+
+- Elements along the last axis (`z`) are contiguous in memory
+- The first axis (`x`) has the largest stride
+- Element `[i, j, k]` is at memory offset `i * Ny * Nz + j * Nz + k`
+
+The last axis is always the fastest-varying in memory.
+
+## Slab Decomposition
+
+### Single Distributed Axis (NDA=1)
+
+With one distributed axis, the tensor is divided into slabs along the first axis. For a 3D tensor of shape `[Nx, Ny, Nz]` distributed across `P` ranks:
+
+```
+Global tensor [Nx, Ny, Nz]
+├── Rank 0: [Nx/P, Ny, Nz]  (rows 0 to Nx/P - 1)
+├── Rank 1: [Nx/P, Ny, Nz]  (rows Nx/P to 2*Nx/P - 1)
+├── ...
+└── Rank P-1: [Nx/P, Ny, Nz]
+```
+
+Each rank owns approximately `Nx/P` complete `[Ny, Nz]` planes. See [Balanced Block Decomposition](#balanced-block-decomposition) for how elements are divided when `Nx` is not evenly divisible by `P`.
+
+### Two Distributed Axes (NDA=2)
+
+With two distributed axes (pencil decomposition), the tensor is divided along two axes using a 2D process grid. For a 3D tensor distributed on a `Px x Py` process grid:
+
+```
+Global tensor [Nx, Ny, Nz]
+├── Rank (0,0): [Nx/Px, Ny/Py, Nz]
+├── Rank (0,1): [Nx/Px, Ny/Py, Nz]
+├── ...
+└── Rank (Px-1, Py-1): [Nx/Px, Ny/Py, Nz]
+```
+
+Each rank owns a "pencil" - a subset of rows in both distributed dimensions, with the full extent of the contiguous axis.
+
+## Layout Changes During FFT
+
+A key aspect of distributed FFTs is that the data layout changes during the transform. SHAFFT performs FFTs axis-by-axis, redistributing data as needed so that each axis is fully available locally when it's being transformed.
+
+### Forward Transform
+
+For a 3D tensor initially distributed along axis 0:
+
+1. Initial layout: Distributed along axis 0, contiguous along axes 1 and 2
+2. FFT along axes 1 and 2: These are local, no redistribution needed
+3. Global redistribution: Data is exchanged so axis 0 becomes local
+4. FFT along axis 0: Now possible since axis 0 is local
+5. Final layout: Distributed along axis 2 (the layout has changed)
+
+The transform changes which axis is distributed:
+
+| Stage | Distributed Axis | Contiguous Axes |
+|-------|------------------|-----------------|
+| Initial | 0 | 1, 2 |
+| After forward FFT | 2 | 1, 0 |
+| After backward FFT | 0 | 1, 2 |
+
+The backward transform reverses this process, returning the tensor to its original distribution.
+
+## Querying Layout Information
+
+SHAFFT provides methods to query the current tensor layout on each rank.
+
+### C++ API
+
+```cpp
+shafft::Plan plan;
+plan.init(1, {64, 64, 32}, shafft::FFTType::C2C, MPI_COMM_WORLD);
+
+// Query local dimensions and global offsets
+std::vector<int> subsize, offset;
+
+// Initial layout (before any transform)
+plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
+// subsize = [16, 64, 32] on rank 0 (for 4 ranks)
+// offset  = [0, 0, 0]    (this rank's starting position)
+
+// Transformed layout (after forward FFT)
+plan.getLayout(subsize, offset, shafft::TensorLayout::TRANSFORMED);
+// subsize = [64, 64, 8] on rank 0 (for 4 ranks)
+// offset  = [0, 0, 0]
+
+// Current layout (tracks actual state)
+plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+
+// Query which axes are distributed vs contiguous
+std::vector<int> contiguous_axes, distributed_axes;
+plan.getAxes(contiguous_axes, distributed_axes, shafft::TensorLayout::INITIAL);
+// contiguous_axes = [1, 2]
+// distributed_axes = [0]
+
+plan.getAxes(contiguous_axes, distributed_axes, shafft::TensorLayout::TRANSFORMED);
+// contiguous_axes = [1, 0]
+// distributed_axes = [2]
+```
+
+### C API
+
+```c
+void *plan;
+shafftPlanCreate(&plan);
+
+int dims[3] = {64, 64, 32};
+shafftPlanNDA(plan, 3, 1, dims, SHAFFT_C2C, MPI_COMM_WORLD);
+
+int subsize[3], offset[3];
+shafftGetLayout(plan, subsize, offset, SHAFFT_TENSOR_LAYOUT_INITIAL);
+shafftGetLayout(plan, subsize, offset, SHAFFT_TENSOR_LAYOUT_TRANSFORMED);
+shafftGetLayout(plan, subsize, offset, SHAFFT_TENSOR_LAYOUT_CURRENT);
+```
+
+The `TensorLayout` parameter specifies which layout to query:
+- `INITIAL` - Layout when plan was created (before any transforms)
+- `TRANSFORMED` - Layout after forward FFT
+- `CURRENT` - Actual current layout (tracks state after each `execute()`)
+
+## Working with Distributed Data
+
+### Initializing Input Data
+
+When initializing data, use the initial layout to determine what portion of the global tensor this rank owns:
+
+```cpp
+shafft::Plan plan;
+plan.init(1, {Nx, Ny, Nz}, shafft::FFTType::C2C, MPI_COMM_WORLD);
+
+std::vector<int> subsize, offset;
+plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
+
+// Allocate buffers
+size_t n = plan.allocSize();
+shafft::complexf *data, *work;
+shafft::allocBuffer(n, &data);
+shafft::allocBuffer(n, &work);
+
+// Initialize this rank's portion
+// Global index (gi, gj, gk) maps to local index (i, j, k) where:
+//   gi = offset[0] + i
+//   gj = offset[1] + j  
+//   gk = offset[2] + k
+for (int i = 0; i < subsize[0]; i++) {
+    for (int j = 0; j < subsize[1]; j++) {
+        for (int k = 0; k < subsize[2]; k++) {
+            int gi = offset[0] + i;
+            int gj = offset[1] + j;
+            int gk = offset[2] + k;
+            
+            // Local linear index (row-major)
+            size_t idx = i * subsize[1] * subsize[2] + j * subsize[2] + k;
+            
+            // Initialize based on global position
+            data[idx] = some_function(gi, gj, gk);
+        }
+    }
+}
+```
+
+### Processing Output Data
+
+After a forward FFT, the layout changes. Query `TRANSFORMED` to get the new distribution before processing results:
+
+```cpp
+plan.execute(shafft::FFTDirection::FORWARD);
+
+std::vector<int> subsize, offset;
+plan.getLayout(subsize, offset, shafft::TensorLayout::TRANSFORMED);
+// Now subsize and offset reflect the post-transform distribution
+```
+
+### Buffer Size vs Tensor Size
+
+The buffer size returned by `allocSize()` may be larger than the local tensor size due to padding for efficient MPI communication:
+
+```cpp
+size_t buffer_elements = plan.allocSize();         // Allocation size
+size_t tensor_elements = subsize[0] * subsize[1] * subsize[2];  // Actual data
+
+// buffer_elements >= tensor_elements
+// Only the first tensor_elements contain meaningful data
+```
+
+## Balanced Block Decomposition {#balanced-block-decomposition}
+
+SHAFFT distributes axes using balanced block-contiguous decomposition. For an axis of length `N` distributed across `M` ranks:
+
+- Base chunk size: `q = N / M` (integer division)
+- Remainder: `r = N % M`
+- Ranks `0` to `r-1` get `q + 1` elements
+- Ranks `r` to `M-1` get `q` elements
+
+This ensures the load is balanced within +/-1 element across all ranks.
+
+Example: Distributing 100 elements across 8 ranks:
+- `q = 12`, `r = 4`
+- Ranks 0-3: 13 elements each (52 total)
+- Ranks 4-7: 12 elements each (48 total)
+- Total: 100 (check)
+
+## See Also
+
+- @ref user-guide - API usage and examples
+- @ref limitations - Known constraints

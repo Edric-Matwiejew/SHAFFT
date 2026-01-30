@@ -1,0 +1,245 @@
+# Backend Reference {#backends}
+
+This page documents backend-specific requirements, build options, and runtime configuration.
+
+---
+
+## FFTW Backend (CPU)
+
+The FFTW backend uses [FFTW3](http://www.fftw.org/) for local FFT computations with optional multi-threading.
+
+### Requirements
+
+| Requirement | Notes |
+|-------------|-------|
+| FFTW3 | With thread support recommended |
+| OpenMP | For parallel regions (optional) |
+
+
+### Build Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `SHAFFT_ENABLE_FFTW` | Enable FFTW backend | `OFF` |
+| `SHAFFT_FFTW_THREADS` | Threading: `pthreads` or `openmp` | `pthreads` |
+
+### Build Example
+
+```bash
+cmake -B build -S . \
+    -DSHAFFT_ENABLE_HIPFFT=OFF \
+    -DSHAFFT_ENABLE_FFTW=ON \
+    -DSHAFFT_BUILD_FORTRAN=ON \
+    -DCMAKE_INSTALL_PREFIX=/opt/shafft
+
+cmake --build build --target install
+```
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|--------|
+| `SHAFFT_FFTW_THREADS` | Number of threads for local FFTs | `1` |
+| `SHAFFT_FFTW_PLANNER` | FFTW planning strategy | `ESTIMATE` |
+
+#### SHAFFT_FFTW_THREADS
+
+Controls the number of threads used by FFTW for local (per-rank) FFT operations.
+
+```bash
+export SHAFFT_FFTW_THREADS=4
+mpirun -np 8 ./my_fft_program
+```
+
+**Note:** Threading must be enabled at compile time. The library is built with pthreads by default.
+
+#### SHAFFT_FFTW_PLANNER
+
+Controls the FFTW planner strategy:
+
+| Value | Planning Time | Execution Speed | Use Case |
+|-------|---------------|-----------------|----------|
+| `ESTIMATE` | Fast | Good | Default, one-time transforms |
+| `MEASURE` | Medium | Better | Repeated transforms |
+| `PATIENT` | Slow | Best | Many repeated transforms |
+| `EXHAUSTIVE` | Very slow | Optimal | Benchmarking, production runs |
+
+```bash
+export SHAFFT_FFTW_PLANNER=MEASURE
+mpirun -np 8 ./my_fft_program
+```
+
+**Note:** Non-ESTIMATE strategies execute actual FFTs during planning, increasing initialization time but potentially improving execution time for repeated transforms.
+
+---
+
+## hipFFT Backend (GPU)
+
+The hipFFT backend uses [hipFFT](https://github.com/ROCm/hipFFT) for GPU-accelerated FFT computations. hipFFT is a portability layer that works with both AMD (ROCm) and NVIDIA (CUDA) GPUs.
+
+### Requirements
+
+| Requirement | Notes |
+|-------------|-------|
+| HIP + hipFFT | ROCm 6.0+ (AMD) or CUDA (NVIDIA) |
+| GPU-aware MPI | Recommended for optimal performance |
+
+### Build Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `SHAFFT_ENABLE_HIPFFT` | Enable hipFFT backend | `ON` |
+| `HIP_PLATFORM` | Target platform: `amd` or `nvidia` | Auto-detected |
+| `ROCM_PATH` | Path to ROCm installation | `/opt/rocm` |
+| `CUDA_PATH` | Path to CUDA (if `HIP_PLATFORM=nvidia`) | - |
+| `OFFLOAD_ARCH` | GPU architecture | Auto-detected |
+| `SHAFFT_GPU_AWARE_MPI` | Assume GPU-aware MPI (see below) | `ON` |
+
+#### GPU-Aware MPI Option
+
+By default, SHAFFT passes device pointers directly to MPI, which requires GPU-aware MPI (e.g., Cray MPICH with GTL, OpenMPI+UCX with CUDA/ROCm support).
+
+If your MPI does not support device buffers, set `-DSHAFFT_GPU_AWARE_MPI=OFF`. SHAFFT will then stage data through host memory automatically, with a small performance penalty.
+
+See the [GPU-Aware MPI](#gpu-aware-mpi) section below for runtime configuration.
+
+### Build Example (AMD GPU)
+
+```bash
+cmake -B build -S . \
+    -DSHAFFT_ENABLE_HIPFFT=ON \
+    -DSHAFFT_ENABLE_FFTW=OFF \
+    -DHIP_PLATFORM=amd \
+    -DOFFLOAD_ARCH=gfx90a \
+    -DSHAFFT_BUILD_FORTRAN=ON \
+    -DCMAKE_INSTALL_PREFIX=/opt/shafft
+
+cmake --build build --target install
+```
+
+Common AMD architectures:
+- `gfx906` - MI50
+- `gfx908` - MI100
+- `gfx90a` - MI210, MI250, MI250X
+- `gfx942` - MI300A, MI300X
+
+### Build Example (NVIDIA GPU)
+
+```bash
+cmake -B build -S . \
+    -DSHAFFT_ENABLE_HIPFFT=ON \
+    -DSHAFFT_ENABLE_FFTW=OFF \
+    -DHIP_PLATFORM=nvidia \
+    -DCUDA_PATH=/usr/local/cuda \
+    -DOFFLOAD_ARCH=sm_86 \
+    -DCMAKE_INSTALL_PREFIX=/opt/shafft
+
+cmake --build build --target install
+```
+
+Common NVIDIA architectures:
+- `sm_70` - V100
+- `sm_80` - A100
+- `sm_86` - RTX 3090, A40
+- `sm_90` - H100
+
+### Environment Variables
+
+The hipFFT backend uses standard HIP/ROCm environment variables:
+
+| Variable | Description | Default |
+|----------|-------------|--------|
+| `HIP_VISIBLE_DEVICES` | GPU device indices to use | All devices |
+| `ROCR_VISIBLE_DEVICES` | GPU device indices (AMD) | All devices |
+| `CUDA_VISIBLE_DEVICES` | GPU device indices (NVIDIA) | All devices |
+
+```bash
+# Use only GPU 0
+export HIP_VISIBLE_DEVICES=0
+mpirun -np 4 ./my_fft_program
+```
+
+#### SHAFFT-Specific Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `SHAFFT_FFT_DIAG` | Enable diagnostic output | `0` (disabled) |
+| `SHAFFT_MAX_STRIDE_ELEMS` | Stride threshold for subplan splitting | `20000` |
+
+#### SHAFFT_FFT_DIAG
+
+Enables detailed diagnostic output for debugging and performance analysis. When enabled, SHAFFT prints per-rank information about:
+- Transform subsequence decomposition
+- Per-subplan parameters (dimensions, strides, batch sizes)
+- Stride-threshold splitting decisions
+- Execution progress
+
+```bash
+export SHAFFT_FFT_DIAG=1
+mpirun -np 4 ./my_fft_program 2>&1 | grep "\[SHAFFT:diag\]"
+```
+
+#### SHAFFT_MAX_STRIDE_ELEMS
+
+Controls the stride threshold for automatic subplan splitting. When hipFFT processes non-contiguous (non-trailing) transform axes with large strides, performance can degrade significantly. SHAFFT automatically splits such transforms into smaller subplans when the stride exceeds this threshold.
+
+| Value | Effect |
+|-------|--------|
+| Higher | Fewer subplans, may be slower for large-stride transforms |
+| Lower | More subplans, better performance for strided data |
+
+```bash
+# Increase threshold for tensors with naturally large strides
+export SHAFFT_MAX_STRIDE_ELEMS=50000
+mpirun -np 4 ./my_fft_program
+```
+
+**Note:** This optimization is specific to non-trailing axis blocks where `idist == 1` and `odist == 1`. Contiguous transforms are not affected.
+
+### GPU-Aware MPI {#gpu-aware-mpi}
+
+For optimal performance, use a GPU-aware MPI implementation that can transfer data directly between GPUs without staging through host memory.
+
+On systems with GPU transport layers (GTL):
+```bash
+# Cray MPICH with GTL
+export MPICH_GPU_SUPPORT_ENABLED=1
+
+# OpenMPI with UCX
+export UCX_TLS=rc,cuda_copy,cuda_ipc
+```
+
+### Note on hipFORT
+
+**hipFORT is not required** to build or use the SHAFFT Fortran interface. SHAFFT provides a portable buffer API (`shafftAllocBuffer`, `shafftCopyToBuffer`, etc.) that works across all backends.
+
+hipFORT is only needed if your Fortran code calls HIP functions directly (e.g., `hipMalloc`, `hipMemcpy`). For such programs, use `hipfc` (included with ROCm):
+
+```bash
+hipfc -lhipfft -I/opt/shafft/include \
+    -L/opt/shafft/lib -lshafftf03 \
+    -L$ROCM_PATH/lib -lamdhip64 \
+    $(mpif90 --showme:link) \
+    -o my_program my_program.f03
+```
+
+For portable code, use SHAFFT's buffer management functions instead.
+
+---
+
+## Adding New Backends
+
+SHAFFT's backend abstraction allows adding new FFT backends. A backend must implement:
+
+1. **FFT method class** - Inherits from the FFT method interface
+2. **Normalize function** - Scales output after inverse transform
+3. **Buffer management** - Allocate/free/copy for the target memory space
+
+See `src/cpp/fft/fftw_method/` and `src/cpp/fft/hipfft_method/` for reference implementations.
+
+---
+
+## See Also
+
+- @ref getting-started - Installation instructions
+- @ref linking-guide - Compile and link your programs
