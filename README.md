@@ -101,16 +101,6 @@ doxygen docs/Doxyfile
 open docs/html/index.html
 ```
 
-Main documentation pages:
-- @ref getting-started - Installation and build options
-- @ref user-guide - API usage with C++, C, and Fortran examples
-- @ref linking-guide - Compile and link instructions
-- @ref backends - Backend-specific configuration
-- @ref limitations - Known constraints and limitations
-
-Or view the source documentation files directly in `docs/`.
-
-
 ## License
 
 MIT License. See [LICENSE](./LICENSE) for details.
