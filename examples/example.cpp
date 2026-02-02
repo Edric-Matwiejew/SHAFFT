@@ -3,11 +3,12 @@
  *  Demonstrates the procedural API with explicit GPU memory management.
  */
 #include <shafft/shafft.hpp>
-#include <mpi.h>
-#include <hip/hip_runtime.h>
+
 #include <hip/hip_complex.h>
-#include <vector>
+#include <hip/hip_runtime.h>
 #include <iostream>
+#include <mpi.h>
+#include <vector>
 
 int main(int argc, char** argv) {
   MPI_Init(&argc, &argv);
@@ -20,7 +21,7 @@ int main(int argc, char** argv) {
   std::vector<int> dims = {64, 64, 32};
 
   // Create plan (procedural API uses PlanData*)
-  shafft::PlanData* plan; 
+  shafft::PlanData* plan;
   shafft::planCreate(&plan);
 
   // NDA planner
@@ -40,7 +41,7 @@ int main(int argc, char** argv) {
   std::vector<int> subsize(ndim), offset(ndim);
   shafft::getLayout(plan, subsize, offset, shafft::TensorLayout::CURRENT);
 
-  size_t alloc_size = 0; 
+  size_t alloc_size = 0;
   shafft::getAllocSize(plan, alloc_size);
 
   // Allocate device memory
@@ -51,7 +52,8 @@ int main(int argc, char** argv) {
 
   // Initialise host memory: set h[0] = (1,0) on rank 0 only, zeros elsewhere
   int local_elems = 1;
-  for (int i = 0; i < ndim; ++i) local_elems *= subsize[i];
+  for (int i = 0; i < ndim; ++i)
+    local_elems *= subsize[i];
   std::vector<hipComplex> h(local_elems, {0.0f, 0.0f});
   if (rank == 0) {
     h[0].x = 1.0f;
@@ -65,16 +67,14 @@ int main(int argc, char** argv) {
   }
   for (int r = 0; r < size; ++r) {
     if (rank == r) {
-      std::cout << "Rank " << rank << " subsize: " 
-                << subsize[0] << "x" << subsize[1] << "x" << subsize[2]
-                << ", offset: " << offset[0] << "," << offset[1] << "," << offset[2]
+      std::cout << "Rank " << rank << " subsize: " << subsize[0] << "x" << subsize[1] << "x"
+                << subsize[2] << ", offset: " << offset[0] << "," << offset[1] << "," << offset[2]
                 << ", h[0] = (" << h[0].x << ", " << h[0].y << ")" << std::endl;
     }
     MPI_Barrier(MPI_COMM_WORLD);
   }
 
-  hipMemcpy(d_data, h.data(), local_elems * sizeof(hipComplex),
-            hipMemcpyHostToDevice);
+  hipMemcpy(d_data, h.data(), local_elems * sizeof(hipComplex), hipMemcpyHostToDevice);
 
   // Attach buffers and execute FFT
   shafft::setBuffers(plan, d_data, d_work);
@@ -83,15 +83,15 @@ int main(int argc, char** argv) {
   shafft::getBuffers(plan, &d_data, &d_work);
 
   // Copy back to check forward result
-  hipMemcpy(h.data(), d_data, local_elems * sizeof(hipComplex),
-            hipMemcpyDeviceToHost);
+  hipMemcpy(h.data(), d_data, local_elems * sizeof(hipComplex), hipMemcpyDeviceToHost);
 
   // Print result: FFT of delta function scaled by 1/sqrt(N) gives constant 1/sqrt(N)
   if (rank == 0) {
     std::cout << "\n=== After forward FFT + normalize ===" << std::endl;
     int N = dims[0] * dims[1] * dims[2];
     float expected = 1.0f / std::sqrt(static_cast<float>(N));
-    std::cout << "Expected: constant (" << expected << ", 0) everywhere (symmetric normalization)" << std::endl;
+    std::cout << "Expected: constant (" << expected << ", 0) everywhere (symmetric normalization)"
+              << std::endl;
   }
   for (int r = 0; r < size; ++r) {
     if (rank == r) {
@@ -111,8 +111,7 @@ int main(int argc, char** argv) {
   shafft::getBuffers(plan, &d_data, &d_work);
 
   // Copy back
-  hipMemcpy(h.data(), d_data, local_elems * sizeof(hipComplex),
-            hipMemcpyDeviceToHost);
+  hipMemcpy(h.data(), d_data, local_elems * sizeof(hipComplex), hipMemcpyDeviceToHost);
 
   // Print result: should recover original delta function
   if (rank == 0) {
@@ -135,7 +134,8 @@ int main(int argc, char** argv) {
   shafft::destroy(&plan);
 
   if (rank == 0) {
-    std::cout << "\nSHAFFT HIP example completed successfully with " << size << " MPI ranks" << std::endl;
+    std::cout << "\nSHAFFT HIP example completed successfully with " << size << " MPI ranks"
+              << std::endl;
   }
 
   MPI_Finalize();

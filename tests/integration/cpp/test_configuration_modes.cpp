@@ -13,6 +13,7 @@
 #include <mpi.h>
 #include <iostream>
 #include <vector>
+#include <algorithm>
 #include <numeric>
 #include <cstring>
 
@@ -460,6 +461,75 @@ static bool test_subsize_global_sum() {
     return true;
 }
 
+// Test: NDA and Cart produce consistent results
+static bool test_nda_cart_consistency() {
+    int world_size;
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    
+    // 2D tensor for simpler comparison
+    std::vector<int> dims = {64, 64};
+    
+    // NDA configuration (explicit nda = 1)
+    int nda = 1;
+    std::vector<int> nda_subsize(2), nda_offset(2), nda_comm_dims(2);
+    int rc1 = shafft::configurationNDA(dims, nda, nda_subsize, nda_offset, nda_comm_dims,
+                                       shafft::FFTType::C2C, 0, MPI_COMM_WORLD);
+    if (world_size == 1) {
+        return expect_status(rc1, shafft::Status::SHAFFT_ERR_INVALID_DECOMP);
+    }
+    if (rc1 != 0) return false;
+    
+    // Cart configuration using the grid chosen by configurationNDA
+    std::vector<int> cart_subsize(2), cart_offset(2);
+    std::vector<int> cart_comm_dims = nda_comm_dims;
+    int comm_size = 0;
+    int rc2 = shafft::configurationCart(dims, cart_subsize, cart_offset, cart_comm_dims,
+                                        comm_size, shafft::FFTType::C2C, 0, MPI_COMM_WORLD);
+    if (rc2 != 0) return false;
+    
+    // Local layouts should match
+    return (nda_subsize == cart_subsize && nda_offset == cart_offset);
+}
+
+// Test: Offsets form contiguous blocks across active ranks
+static bool test_offsets_contiguous() {
+    int world_size;
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    
+    std::vector<int> dims = {100, 50};
+    int nda = 1;
+    std::vector<int> subsize(2), offset(2), COMM_DIMS(2);
+    
+    int rc = shafft::configurationNDA(dims, nda, subsize, offset, COMM_DIMS,
+                                       shafft::FFTType::C2C, 0, MPI_COMM_WORLD);
+    if (world_size == 1) {
+        return expect_status(rc, shafft::Status::SHAFFT_ERR_INVALID_DECOMP);
+    }
+    if (rc != 0) return false;
+    
+    // Gather offsets/sizes for axis 0 from all ranks
+    std::vector<int> all_offsets(world_size), all_sizes(world_size);
+    MPI_Allgather(&offset[0], 1, MPI_INT, all_offsets.data(), 1, MPI_INT, MPI_COMM_WORLD);
+    MPI_Allgather(&subsize[0], 1, MPI_INT, all_sizes.data(), 1, MPI_INT, MPI_COMM_WORLD);
+    
+    // Only first cart_size ranks are active
+    int cart_size = COMM_DIMS[0];
+    if (cart_size < 1) return false;
+    
+    for (int i = 0; i < cart_size - 1; ++i) {
+        if (all_offsets[i] + all_sizes[i] != all_offsets[i + 1]) {
+            return false;
+        }
+    }
+    
+    // Last active rank should end exactly at global dimension
+    if (all_offsets[cart_size - 1] + all_sizes[cart_size - 1] != dims[0]) {
+        return false;
+    }
+    
+    return true;
+}
+
 // Test: configurationNDA with explicit nda=2 produces exactly 2 distributed axes
 // With strict mode, the grid must have exactly nda axes with >1 entries
 static bool test_configurationNDA_strict_nda() {
@@ -812,6 +882,8 @@ int main(int argc, char** argv) {
     
     // Common behavior tests
     runner.run("Subsizes sum to global dims", test_subsize_global_sum);
+    runner.run("NDA and Cart consistency", test_nda_cart_consistency);
+    runner.run("Offsets are contiguous", test_offsets_contiguous);
     
     // Memory limit tests (auto mode)
     runner.run("configurationNDA: auto mem_limit enforced", test_configurationNDA_mem_limit_enforced);

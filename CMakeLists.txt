@@ -1,19 +1,17 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(shafft
-  VERSION 0.0.1
-  DESCRIPTION "N-D HIP-accelerated MPI-parallel FFT."
-  LANGUAGES CXX            # HIP is enabled conditionally below for the HIP backend
-)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+  message(FATAL_ERROR "In-source builds are not allowed.")
+endif()
+
+project(shafft VERSION 0.1.0 DESCRIPTION "N-D HIP-accelerated MPI-parallel FFT." LANGUAGES CXX)
 
 set(SHAFFT_VERSION_SUFFIX "-alpha" CACHE STRING "version suffix")
 
-# C++17 standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# GNU install directories and RPATH settings
 include(GNUInstallDirs)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
@@ -30,9 +28,8 @@ endif()
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
-# ---------------- Backend selection (mutually exclusive) ----------------
 option(SHAFFT_ENABLE_HIPFFT "Enable HIPFFT backend (GPU)" ON)
-option(SHAFFT_ENABLE_FFTW   "Enable FFTW backend (CPU)"   OFF)
+option(SHAFFT_ENABLE_FFTW "Enable FFTW backend (CPU)" OFF)
 
 if(SHAFFT_ENABLE_FFTW)
   set(SHAFFT_ENABLE_HIPFFT OFF CACHE BOOL "" FORCE)
@@ -40,7 +37,6 @@ elseif(SHAFFT_ENABLE_HIPFFT)
   set(SHAFFT_ENABLE_FFTW OFF CACHE BOOL "" FORCE)
 endif()
 
-# Default to HIPFFT if no backend specified
 if(NOT SHAFFT_ENABLE_HIPFFT AND NOT SHAFFT_ENABLE_FFTW)
   message(STATUS "No backend specified, defaulting to HIPFFT")
   set(SHAFFT_ENABLE_HIPFFT ON CACHE BOOL "" FORCE)
@@ -51,37 +47,48 @@ set(SHAFFT_FFTW_THREADS "pthreads" CACHE STRING "FFTW threading backend: pthread
 set_property(CACHE SHAFFT_FFTW_THREADS PROPERTY STRINGS pthreads openmp)
 
 # GPU architecture override (optional - leave empty for auto-detect)
-set(SHAFFT_GPU_ARCHITECTURES "" CACHE STRING
-    "GPU architectures to compile for (e.g., gfx90a;gfx942 or sm_80;sm_90). Empty = auto-detect")
-
+set(
+  SHAFFT_GPU_ARCHITECTURES
+  ""
+  CACHE STRING
+  "GPU architectures to compile for (e.g., gfx90a;gfx942 or sm_80;sm_90). Empty = auto-detect"
+)
 
 # Backend name + preprocessor defines visible to all subdirs
 if(SHAFFT_ENABLE_HIPFFT)
   set(SHAFFT_BACKEND_NAME "hipFFT")
   set(SHAFFT_BACKEND_HIPFFT 1)
-  set(SHAFFT_BACKEND_FFTW   0)
+  set(SHAFFT_BACKEND_FFTW 0)
 else()
   set(SHAFFT_BACKEND_NAME "FFTW")
   set(SHAFFT_BACKEND_HIPFFT 0)
-  set(SHAFFT_BACKEND_FFTW   1)
+  set(SHAFFT_BACKEND_FFTW 1)
 endif()
 
 # GPU-aware MPI: pass device pointers directly to MPI (requires compatible MPI)
 option(SHAFFT_GPU_AWARE_MPI "Assume GPU-aware MPI for device pointer exchanges" ON)
 if(SHAFFT_ENABLE_HIPFFT AND SHAFFT_GPU_AWARE_MPI)
   set(SHAFFT_GPU_AWARE_MPI_VAL 1)
-  message(STATUS "GPU-aware MPI: enabled (device pointers in MPI calls)")
+  message(STATUS "GPU-aware MPI: enabled")
 elseif(SHAFFT_ENABLE_HIPFFT)
   set(SHAFFT_GPU_AWARE_MPI_VAL 0)
-  message(STATUS "GPU-aware MPI: disabled (host staging for MPI calls)")
+  message(STATUS "GPU-aware MPI: disabled")
 else()
-  set(SHAFFT_GPU_AWARE_MPI_VAL 0)  # Not applicable for FFTW
+  set(SHAFFT_GPU_AWARE_MPI_VAL 0) # Not applicable for FFTW
 endif()
 
 # ---------------- Generated config header ----------------
 set(SHAFFT_CONFIG_BUILD_DIR ${PROJECT_BINARY_DIR}/include/shafft)
 file(MAKE_DIRECTORY "${SHAFFT_CONFIG_BUILD_DIR}")
 set(SHAFFT_CONFIG_HEADER "${SHAFFT_CONFIG_BUILD_DIR}/shafft_config.h")
+
+# Guard against stale source-tree config headers that would shadow the generated one
+if(EXISTS ${PROJECT_SOURCE_DIR}/include/shafft/shafft_config.h)
+  message(
+    FATAL_ERROR
+    "Remove source-tree include/shafft/shafft_config.h; config is generated at build/include/shafft/shafft_config.h"
+  )
+endif()
 
 configure_file(
   ${CMAKE_SOURCE_DIR}/cmake/shafft_config.h.in
@@ -94,7 +101,6 @@ find_package(MPI REQUIRED)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# Default build type
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the build type (Debug or Release)" FORCE)
 endif()
@@ -109,33 +115,45 @@ endif()
 
 # ---------------- Backend-specific toolchains & flags ----------------
 if(SHAFFT_ENABLE_HIPFFT)
-  # Apply user-specified GPU architectures if provided
   if(SHAFFT_GPU_ARCHITECTURES)
     set(CMAKE_HIP_ARCHITECTURES ${SHAFFT_GPU_ARCHITECTURES})
-    message(STATUS "GPU architectures (user-specified): ${CMAKE_HIP_ARCHITECTURES}")
+    message(STATUS "GPU architectures: ${CMAKE_HIP_ARCHITECTURES}")
   endif()
 
   # Enable HIP language
   enable_language(HIP)
 
-  find_package(HIP REQUIRED)
+  # Help CMake find ROCm cmake configs (needed for ROCm 6.x)
+  if(DEFINED ENV{ROCM_PATH})
+    list(APPEND CMAKE_PREFIX_PATH "$ENV{ROCM_PATH}" "$ENV{ROCM_PATH}/lib/cmake")
+  elseif(IS_DIRECTORY "/opt/rocm")
+    list(APPEND CMAKE_PREFIX_PATH "/opt/rocm" "/opt/rocm/lib/cmake")
+  endif()
+
+  find_package(hip REQUIRED CONFIG)
   find_package(hipfft REQUIRED)
 
-  # GTL (GPU Transport Layer) is optional - only needed on Cray systems with MPICH.
-  # Other GPU-aware MPI implementations (OpenMPI+UCX, MVAPICH+GDR) work without it.
-  option(SHAFFT_REQUIRE_GTL "Require GTL library for GPU-aware MPI (Cray systems)" OFF)
-  find_package(mpi_gtl_hsa QUIET)
-  if(mpi_gtl_hsa_FOUND OR mpi_gtl_FOUND)
-    set(SHAFFT_HAVE_GTL TRUE)
-    message(STATUS "GTL library found: ${mpi_gtl_LIBRARIES}")
+  # -------- gpuTT (GPU tensor transpose library) --------
+  # Required for high-dimensional FFT performance (transpose-based algorithm)
+  include(GputtDependency)
+  message(STATUS "gpuTT: provider=${GPUTT_PROVIDER}, version=${GPUTT_VERSION}")
+
+  if(SHAFFT_GPU_AWARE_MPI)
+    option(SHAFFT_REQUIRE_GTL "Require GTL library for GPU-aware MPI on Cray systems" OFF)
+    find_package(CrayGTL QUIET)
+    if(CrayGTL_FOUND)
+      set(SHAFFT_HAVE_GTL TRUE)
+      message(STATUS "GTL library found: ${CrayGTL_LIBRARIES} (${CrayGTL_TYPE})")
+    else()
+      set(SHAFFT_HAVE_GTL FALSE)
+      if(SHAFFT_REQUIRE_GTL)
+        message(FATAL_ERROR "GTL library required but not found.")
+      else()
+        message(STATUS "GTL library not found")
+      endif()
+    endif()
   else()
     set(SHAFFT_HAVE_GTL FALSE)
-    if(SHAFFT_REQUIRE_GTL)
-      message(FATAL_ERROR "GTL library required but not found. "
-        "Set SHAFFT_REQUIRE_GTL=OFF for non-Cray GPU-aware MPI implementations.")
-    else()
-      message(STATUS "GTL library not found (only required on Cray systems)")
-    endif()
   endif()
 
   # Initialize CMAKE_HIP_FLAGS
@@ -161,27 +179,38 @@ if(SHAFFT_ENABLE_HIPFFT)
       get_filename_component(CXX_COMPILER_DIR ${CMAKE_CXX_COMPILER} DIRECTORY)
       get_filename_component(GCC_TOOLCHAIN_DIR ${CXX_COMPILER_DIR} DIRECTORY)
       set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --gcc-toolchain=${GCC_TOOLCHAIN_DIR}")
-      message(STATUS "GCC detected, setting --gcc-toolchain to ${GCC_TOOLCHAIN_DIR}")
+      message(STATUS "GCC toolchain: ${GCC_TOOLCHAIN_DIR}")
     endif()
   endif()
 
   message(STATUS "CMAKE_HIP_FLAGS: ${CMAKE_HIP_FLAGS}")
-
-else()  # SHAFFT_ENABLE_FFTW
+else() # SHAFFT_ENABLE_FFTW
   # -------- FFTW backend discovery (CPU) --------
-  find_package(OpenMP REQUIRED)
+  # Only require OpenMP when explicitly requested or when falling back from
+  # pthreads to OpenMP threading because pthread libs are unavailable.
+  set(_shafft_need_openmp FALSE)
+  if(SHAFFT_FFTW_THREADS STREQUAL "openmp")
+    set(_shafft_need_openmp TRUE)
+    find_package(OpenMP REQUIRED)
+  endif()
 
   # Fetch the FindFFTW.cmake module from GitHub
-  option(SHAFFT_FINDFFTW_SOURCE_DIR "Path to a local checkout of findfftw (contains FindFFTW.cmake)" "")
+  option(
+    SHAFFT_FINDFFTW_SOURCE_DIR
+    "Path to a local checkout of findfftw (contains FindFFTW.cmake)"
+    ""
+  )
 
   if(SHAFFT_FINDFFTW_SOURCE_DIR)
     set(findfftw_SOURCE_DIR "${SHAFFT_FINDFFTW_SOURCE_DIR}")
   else()
     include(FetchContent)
-    FetchContent_Declare(FindFFTW
+    FetchContent_Declare(
+      FindFFTW
       GIT_REPOSITORY https://github.com/egpbos/findfftw.git
-      GIT_TAG        master   # upstream only publishes master/testing branches
-      GIT_SHALLOW    TRUE
+      GIT_TAG
+        master # upstream only publishes master/testing branches
+      GIT_SHALLOW TRUE
       UPDATE_DISCONNECTED TRUE
     )
     FetchContent_MakeAvailable(FindFFTW)
@@ -198,7 +227,10 @@ else()  # SHAFFT_ENABLE_FFTW
     if(TARGET FFTW::DoubleOpenMP AND TARGET FFTW::FloatOpenMP)
       set(SHAFFT_FFTW_USE_OMP ON)
     else()
-      message(FATAL_ERROR "FFTW OpenMP threading requested but FFTW::DoubleOpenMP or FFTW::FloatOpenMP not found.")
+      message(
+        FATAL_ERROR
+        "FFTW OpenMP threading requested but FFTW::DoubleOpenMP or FFTW::FloatOpenMP not found."
+      )
     endif()
   else()
     # pthreads (default)
@@ -206,9 +238,15 @@ else()  # SHAFFT_ENABLE_FFTW
       # Fall back to OpenMP if pthreads not available
       if(TARGET FFTW::DoubleOpenMP AND TARGET FFTW::FloatOpenMP)
         set(SHAFFT_FFTW_USE_OMP ON)
-        message(STATUS "FFTW pthreads not found; falling back to OpenMP threading.")
+        if(NOT _shafft_need_openmp)
+          find_package(OpenMP REQUIRED)
+        endif()
+        message(STATUS "FFTW pthreads not found; using OpenMP threading")
       else()
-        message(FATAL_ERROR "FFTW threading libraries not found (need either pthreads or OpenMP for both double and float).")
+        message(
+          FATAL_ERROR
+          "FFTW threading libraries not found (need either pthreads or OpenMP for both double and float)."
+        )
       endif()
     endif()
   endif()
@@ -217,34 +255,44 @@ else()  # SHAFFT_ENABLE_FFTW
   message(STATUS "FFTW double lib : ${FFTW_DOUBLE_LIB}")
   message(STATUS "FFTW float  lib : ${FFTW_FLOAT_LIB}")
   if(SHAFFT_FFTW_USE_OMP)
-    message(STATUS "FFTW threads    : OpenMP (double: ${FFTW_DOUBLE_OPENMP_LIB}, float: ${FFTW_FLOAT_OPENMP_LIB})")
+    message(
+      STATUS
+      "FFTW threads    : OpenMP (double: ${FFTW_DOUBLE_OPENMP_LIB}, float: ${FFTW_FLOAT_OPENMP_LIB})"
+    )
   else()
-    message(STATUS "FFTW threads    : pthreads (double: ${FFTW_DOUBLE_THREADS_LIB}, float: ${FFTW_FLOAT_THREADS_LIB})")
+    message(
+      STATUS
+      "FFTW threads    : pthreads (double: ${FFTW_DOUBLE_THREADS_LIB}, float: ${FFTW_FLOAT_THREADS_LIB})"
+    )
   endif()
 endif()
-
 
 # ---------------- Common INTERFACE library ----------------
 add_library(shafft_options INTERFACE)
 add_library(shafft::options ALIAS shafft_options)
 
-target_compile_definitions(shafft_options INTERFACE
-  SHAFFT_BACKEND_HIPFFT=${SHAFFT_BACKEND_HIPFFT}
-  SHAFFT_BACKEND_FFTW=${SHAFFT_BACKEND_FFTW}
+target_compile_definitions(
+  shafft_options
+  INTERFACE
+    SHAFFT_BACKEND_HIPFFT=${SHAFFT_BACKEND_HIPFFT}
+    SHAFFT_BACKEND_FFTW=${SHAFFT_BACKEND_FFTW}
 )
 
-target_include_directories(shafft_options INTERFACE
-  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-  $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
-  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+target_include_directories(
+  shafft_options
+  INTERFACE
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 if(SHAFFT_ENABLE_HIPFFT)
   target_link_libraries(shafft_options INTERFACE hip::host)
 endif()
 
-target_compile_options(shafft_options INTERFACE
-  $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:Debug>>:-Wall -Wextra>
+target_compile_options(
+  shafft_options
+  INTERFACE $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:Debug>>:-Wall -Wextra>
 )
 
 # ---------------- Subdirectories ----------------
@@ -256,6 +304,8 @@ option(SHAFFT_BUILD_FORTRAN "Build Fortran 2003 interface" OFF)
 
 if(SHAFFT_BUILD_FORTRAN)
   message(STATUS "Build Fortran - yes")
+  # Set module directory here so it's available for install commands
+  set(CMAKE_Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/include)
   add_subdirectory(src/f03)
 else()
   message(STATUS "Build Fortran - no")
@@ -310,14 +360,10 @@ install(
 
 # Install Fortran library if built
 if(SHAFFT_BUILD_FORTRAN)
-  install(
-    TARGETS shafftf03
-    EXPORT shafftTargets
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  )
+  install(TARGETS shafftf03 EXPORT shafftTargets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
   install(
     FILES ${CMAKE_Fortran_MODULE_DIRECTORY}/shafft.mod
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shafft
   )
 endif()
 
@@ -325,14 +371,13 @@ endif()
 install(
   DIRECTORY ${PROJECT_SOURCE_DIR}/include/shafft
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-  FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
+  FILES_MATCHING
+  PATTERN "*.hpp"
+  PATTERN "*.h"
 )
 
 # Install generated config header
-install(
-  FILES ${SHAFFT_CONFIG_HEADER}
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shafft
-)
+install(FILES ${SHAFFT_CONFIG_HEADER} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/shafft)
 
 # Install package config files
 install(
@@ -343,8 +388,4 @@ install(
 )
 
 # Export targets for find_package()
-install(
-  EXPORT shafftTargets
-  NAMESPACE shafft::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/shafft
-)
+install(EXPORT shafftTargets NAMESPACE shafft:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/shafft)

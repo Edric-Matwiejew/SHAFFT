@@ -6,6 +6,10 @@ These generic interfaces allow calling SHAFFT routines without specifying
 the precision suffix. The compiler selects the appropriate implementation
 based on argument types.
 
+Subroutines return a SHAFFT status code via a required @c ierr argument.
+Caller code is responsible for handling errors; no fail-fast behavior is
+applied by the wrappers.
+
 @section plan_interface shafftPlan
 
 Create an FFT plan. Dispatches to:
@@ -36,6 +40,9 @@ Retrieve the plan's current data/work buffer pointers. Dispatches to:
 routine <b>after</b> shafftExecute() to ensure that @c data points to the
 transformed results.
 
+@note @c alloc_size is now optional. If omitted, the wrapper calls
+@c shafftGetAllocSize internally to set the pointer extents.
+
 @subsection allocbuffer shafftAllocBuffer
 
 Allocate a buffer suitable for the current backend. Dispatches to:
@@ -62,6 +69,8 @@ Copy data from host memory to a SHAFFT buffer. Dispatches to:
 On GPU backends (hipFFT), performs host-to-device copy.
 On CPU backends (FFTW), performs memcpy.
 
+The `count` argument is optional; if omitted, the entire source array is copied.
+
 @subsection copyfrombuffer shafftCopyFromBuffer
 
 Copy data from a SHAFFT buffer to host memory. Dispatches to:
@@ -71,19 +80,24 @@ Copy data from a SHAFFT buffer to host memory. Dispatches to:
 On GPU backends (hipFFT), performs device-to-host copy.
 On CPU backends (FFTW), performs memcpy.
 
+The `count` argument is optional; if omitted, the destination array extent is used.
+
+@note All Fortran wrappers return status via the required @c ierr argument.
+
 @par Example Usage:
 @code{.f90}
 use shafft
 
 complex(c_float_complex), pointer :: data_buf(:), work_buf(:)
+integer :: ierr
 
 ! Allocate buffers (generic interface selects precision from pointer type)
-call shafftAllocBuffer(alloc_size, data_buf)
-call shafftAllocBuffer(alloc_size, work_buf)
+call shafftAllocBuffer(alloc_size, data_buf, ierr)
+call shafftAllocBuffer(alloc_size, work_buf, ierr)
 
 ! Attach to plan
-call shafftSetBuffers(plan, data_buf, work_buf)
+call shafftSetBuffers(plan, data_buf, work_buf, ierr)
 
 ! After execute, retrieve current buffer state
-call shafftGetBuffers(plan, alloc_size, data_buf, work_buf)
+call shafftGetBuffers(plan, alloc_size, data_buf, work_buf, ierr)
 @endcode

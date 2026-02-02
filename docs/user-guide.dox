@@ -60,9 +60,9 @@ printf("SHAFFT %d.%d.%d\n", v.major, v.minor, v.patch);
 
 ```c
 // C
-const char* backend = shafftBackendName();
+const char* backend = shafftGetBackendName();
 int major, minor, patch;
-shafftVersion(&major, &minor, &patch);
+shafftGetVersion(&major, &minor, &patch);
 ```
 
 ```fortran
@@ -224,6 +224,8 @@ int main(int argc, char** argv) {
 ## Fortran API
 
 The Fortran API uses a module interface with portable buffer management.
+All wrappers return a SHAFFT status code via a required @c ierr argument.
+Call @c shafftLastErrorMessage() for human-readable text.
 
 ### Complete Example
 
@@ -246,36 +248,36 @@ program example_f03
   call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
 
   ! Initialize plan (double precision Z2Z)
-  call shafftPlanNDA(plan, 3, 1, dims, SHAFFT_Z2Z, MPI_COMM_WORLD%MPI_VAL)
+  call shafftPlanNDA(plan, 3, 1, dims, SHAFFT_Z2Z, MPI_COMM_WORLD%MPI_VAL, ierr)
 
   ! Get allocation size and allocate buffers
-  call shafftGetAllocSize(plan, alloc_size)
-  call shafftAllocBuffer(alloc_size, data)
-  call shafftAllocBuffer(alloc_size, work)
+  call shafftGetAllocSize(plan, alloc_size, ierr)
+  call shafftAllocBuffer(alloc_size, data, ierr)
+  call shafftAllocBuffer(alloc_size, work, ierr)
 
   ! Initialize host data and copy to buffer
   allocate(host_data(alloc_size))
   host_data = (1.0d0, 0.0d0)
-  call shafftCopyToBuffer(data, host_data, alloc_size)
+  call shafftCopyToBuffer(data, host_data, alloc_size, ierr)
 
   ! Execute transforms
-  call shafftSetBuffers(plan, data, work)
-  call shafftExecute(plan, SHAFFT_FORWARD)
-  call shafftExecute(plan, SHAFFT_BACKWARD)
-  call shafftNormalize(plan)
+  call shafftSetBuffers(plan, data, work, ierr)
+  call shafftExecute(plan, SHAFFT_FORWARD, ierr)
+  call shafftExecute(plan, SHAFFT_BACKWARD, ierr)
+  call shafftNormalize(plan, ierr)
 
   ! Get current buffers (may have been swapped) and copy result back
-  call shafftGetBuffers(plan, alloc_size, data, work)
-  call shafftCopyFromBuffer(host_data, data, alloc_size)
+  call shafftGetBuffers(plan, alloc_size, data, work, ierr)
+  call shafftCopyFromBuffer(host_data, data, alloc_size, ierr)
 
   if (rank == 0) then
     print '(A,2F10.4)', 'Result[1] = ', host_data(1)
   end if
 
   ! Cleanup
-  call shafftDestroy(plan)
-  call shafftFreeBuffer(data)
-  call shafftFreeBuffer(work)
+  call shafftDestroy(plan, ierr)
+  call shafftFreeBuffer(data, ierr)
+  call shafftFreeBuffer(work, ierr)
   deallocate(host_data)
 
   call MPI_Finalize(ierr)
@@ -284,20 +286,20 @@ end program
 
 ### Key Fortran Subroutines
 
-| Subroutine | Description |
-|------------|-------------|
-| `shafftPlanNDA(plan, ndim, nda, dims, type, comm)` | Create plan with NDA decomposition |
-| `shafftPlanCart(plan, ndim, comm_dims, dims, type, comm)` | Create plan with Cartesian decomposition |
-| `shafftGetAllocSize(plan, alloc_size)` | Get required buffer allocation size |
-| `shafftAllocBuffer(n, ptr)` | Allocate buffer (precision auto-detected) |
-| `shafftFreeBuffer(ptr)` | Free buffer |
-| `shafftCopyToBuffer(dst, src, n)` | Copy host array to buffer |
-| `shafftCopyFromBuffer(dst, src, n)` | Copy buffer to host array |
-| `shafftSetBuffers(plan, data, work)` | Set data and work buffers |
-| `shafftGetBuffers(plan, n, data, work)` | Get current buffer pointers |
-| `shafftExecute(plan, direction)` | Execute FFT |
-| `shafftNormalize(plan)` | Normalize after inverse FFT |
-| `shafftDestroy(plan)` | Release plan resources |
+| Subroutine (all return `ierr`) | Description |
+|--------------------------------|-------------|
+| `shafftPlanNDA(plan, ndim, nda, dims, type, comm, ierr)` | Create plan with NDA decomposition |
+| `shafftPlanCart(plan, comm_dims, dims, type, comm, ierr)` | Create plan with Cartesian decomposition |
+| `shafftGetAllocSize(plan, alloc_size, ierr)` | Get required buffer allocation size |
+| `shafftAllocBuffer(n, ptr, ierr)` | Allocate buffer (precision auto-detected) |
+| `shafftFreeBuffer(ptr, ierr)` | Free buffer |
+| `shafftCopyToBuffer(dst, src, n, ierr)` | Copy host array to buffer (n optional) |
+| `shafftCopyFromBuffer(dst, src, n, ierr)` | Copy buffer to host array (n optional) |
+| `shafftSetBuffers(plan, data, work, ierr)` | Set data and work buffers |
+| `shafftGetBuffers(plan, n, data, work, ierr)` | Get current buffer pointers (`n` optional; if omitted the wrapper queries `shafftGetAllocSize`) |
+| `shafftExecute(plan, direction, ierr)` | Execute FFT |
+| `shafftNormalize(plan, ierr)` | Normalize after inverse FFT |
+| `shafftDestroy(plan, ierr)` | Release plan resources |
 
 ### Key Fortran Constants
 

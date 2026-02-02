@@ -1,8 +1,9 @@
 #ifndef FFT_METHOD_H
 #define FFT_METHOD_H
 
-#include "ffthandle.h"
 #include <shafft/shafft_types.hpp>
+
+#include "ffthandle.h"
 
 /**
  * @brief Plan a contiguous multi-dimensional FFT using FFTW (guru64 interface).
@@ -15,9 +16,7 @@
  * @param precision  Precision type (C2C for single, Z2Z for double).
  * @return           0 on success or throws std::exception on error.
  */
-int fftPlan(fftHandle &plan,
-            int nta, int *ta,
-            int ndim, int *dimensions,
+int fftPlan(fftHandle& plan, int nta, int* ta, int ndim, int* dimensions,
             shafft::FFTType precision);
 
 /**
@@ -29,9 +28,7 @@ int fftPlan(fftHandle &plan,
  * @param direction  Transform direction (FORWARD or BACKWARD).
  * @return           0 on success.
  */
-int fftExecute(fftHandle plan,
-               void *data, void *work,
-               shafft::FFTDirection direction);
+int fftExecute(fftHandle plan, void*& data, void*& work, shafft::FFTDirection direction);
 
 /**
  * @brief Destroy an FFT plan and free all associated FFTW resources.
@@ -41,4 +38,4 @@ int fftExecute(fftHandle plan,
  */
 int fftDestroy(fftHandle plan);
 
-#endif // FFT_METHOD_H
+#endif  // FFT_METHOD_H

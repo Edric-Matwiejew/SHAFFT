@@ -25,9 +25,14 @@ if(SHAFFT_ENABLE_HIPFFT)
 
   add_library(shafftc SHARED ${SHAFFTC_OBJECTS})
 
-  target_include_directories(shafftc PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}  # for internal headers
-    ${CMAKE_CURRENT_SOURCE_DIR}/../cpp  # for _shafft.hpp
+  target_include_directories(shafftc
+    PUBLIC
+      $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+      $<INSTALL_INTERFACE:include>
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/../cpp
   )
 
   # Link HIP + MPI + common options
@@ -38,11 +43,12 @@ if(SHAFFT_ENABLE_HIPFFT)
     PRIVATE
       hip::host
       hip::hipfft
+      gputt
   )
 
   # GTL is only needed on Cray systems with GPU-aware MPICH
   if(SHAFFT_HAVE_GTL)
-    target_link_libraries(shafftc PUBLIC ${mpi_gtl_LIBRARIES})
+    target_link_libraries(shafftc PUBLIC CrayGTL::CrayGTL)
   endif()
 
 elseif(SHAFFT_ENABLE_FFTW)
@@ -53,23 +59,29 @@ elseif(SHAFFT_ENABLE_FFTW)
 
   add_library(shafftc SHARED ${SHAFFTC_OBJECTS})
 
-  # Link exactly the targets defined by the egpbos FindFFTW
-  # Base (double + float)
   target_link_libraries(shafftc
     PUBLIC  shafft_options MPI::MPI_CXX
-    PRIVATE FFTW::Double FFTW::Float OpenMP::OpenMP_CXX
+    PRIVATE FFTW::Double FFTW::Float
   )
   # Threads: link both double and float threading libraries based on user's choice
   if(SHAFFT_FFTW_USE_OMP)
     target_link_libraries(shafftc PRIVATE FFTW::DoubleOpenMP FFTW::FloatOpenMP)
+    if(OpenMP_CXX_FOUND)
+      target_link_libraries(shafftc PRIVATE OpenMP::OpenMP_CXX)
+    endif()
   else()
     target_link_libraries(shafftc PRIVATE FFTW::DoubleThreads FFTW::FloatThreads)
   endif()
 
-  target_include_directories(shafftc PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}  # for internal headers
-    ${CMAKE_CURRENT_SOURCE_DIR}/../cpp  # for _shafft.hpp
-    ${FFTW_INCLUDE_DIRS}
+  target_include_directories(shafftc
+    PUBLIC
+      $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+      $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+      $<INSTALL_INTERFACE:include>
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/../cpp
+      ${FFTW_INCLUDE_DIRS}
   )
 
 else()

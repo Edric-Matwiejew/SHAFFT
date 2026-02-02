@@ -10,6 +10,27 @@ SHAFFT is designed for distributed multi-dimensional FFTs. The current version h
 
 This is because slab decomposition requires at least one non-distributed axis for local computation, which is not possible with only one dimension.
 
+### Cross-Axis Constraint for Multi-Distributed Tensors
+
+When distributing a tensor across multiple axes, there is a **cross-axis constraint** that limits the process grid dimensions based on the contiguous axis sizes.
+
+During the FFT computation, SHAFFT performs exchanges that redistribute data between distributed and contiguous axes. Specifically, distributed axis `j` will be exchanged with contiguous axis `j + nca` (where `nca = ndim - nda` is the number of contiguous axes). This exchange requires:
+
+```
+COMM_DIMS[j] <= dimensions[j + nca]   for all j in [0, nda)
+```
+
+**Example**: For a 4D tensor `[32, 32, 2, 8]` with `nda = 2` distributed axes:
+- `nca = 2` (axes 2 and 3 are contiguous)
+- Constraint for `j=0`: `COMM_DIMS[0] <= dimensions[2] = 2`
+- Constraint for `j=1`: `COMM_DIMS[1] <= dimensions[3] = 8`
+
+If you request a grid like `[4, 2, 1, 1]` (4 ranks on axis 0), this violates the constraint since `COMM_DIMS[0] = 4 > dimensions[2] = 2`, and the plan creation will fail with `SHAFFT_ERR_INVALID_DECOMP`.
+
+**Recommendation**: When using `planNDA()`, the library automatically caps the grid to satisfy this constraint. When using `planCart()` with an explicit grid, ensure your grid satisfies both:
+1. `COMM_DIMS[i] <= dimensions[i]` (direct constraint)
+2. `COMM_DIMS[i] <= dimensions[i + nca]` (cross-axis constraint)
+
 ## Transform Types
 
 Currently only complex-to-complex (C2C/Z2Z) transforms are supported:

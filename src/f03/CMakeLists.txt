@@ -1,9 +1,8 @@
 enable_language(Fortran)
 
-set(CMAKE_Fortran_MODULE_DIRECTORY ${CMAKE_BINARY_DIR}/include)
+# CMAKE_Fortran_MODULE_DIRECTORY is set in parent CMakeLists.txt
 set(CMAKE_Fortran_PREPROCESS ON)
 
-# Collect all objects needed for a self-contained Fortran library
 set(SHAFFTF03_OBJECTS
   shafft.f03 
   shafftf03.cpp
@@ -13,42 +12,48 @@ set(SHAFFTF03_OBJECTS
   $<TARGET_OBJECTS:fft_method>
 )
 
-# Add FFTW-specific objects if needed
 if(SHAFFT_ENABLE_FFTW)
   list(APPEND SHAFFTF03_OBJECTS
     ${CMAKE_CURRENT_SOURCE_DIR}/../cpp/fft/fftw_method/normalize.cpp
   )
 endif()
 
-# Build the self-contained Fortran library
 add_library(shafftf03 SHARED ${SHAFFTF03_OBJECTS})
+
+# Force Fortran linker to ensure Fortran module symbols are preserved
+# (HIP/C++ linker would strip them)
+set_target_properties(shafftf03 PROPERTIES LINKER_LANGUAGE Fortran)
 
 add_dependencies(shafftf03 shafft fft_method)
 
-# Link to shafft_options for public header include paths and backend dependencies
 target_link_libraries(shafftf03 PRIVATE shafft_options)
 
 target_include_directories(shafftf03
+  PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
   PRIVATE	
-  ${CMAKE_CURRENT_SOURCE_DIR}/../c
-  ${CMAKE_CURRENT_SOURCE_DIR}/../cpp
-  # Fortran preprocessor uses #include "shafft_config.h" (no prefix)
-  ${PROJECT_BINARY_DIR}/include/shafft
+    ${CMAKE_CURRENT_SOURCE_DIR}/../c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../cpp
+    ${PROJECT_BINARY_DIR}/include/shafft
 )
 
-# Link backend-specific libraries
 if(SHAFFT_ENABLE_HIPFFT)
   target_link_libraries(shafftf03 
-    PRIVATE hip::host hip::hipfft ${mpi_gtl_LIBRARIES}
+    PRIVATE hip::host hip::hipfft gputt $<TARGET_NAME_IF_EXISTS:CrayGTL::CrayGTL>
     PUBLIC MPI::MPI_CXX
   )
 elseif(SHAFFT_ENABLE_FFTW)
   target_link_libraries(shafftf03 
     PUBLIC MPI::MPI_CXX
-    PRIVATE FFTW::Double FFTW::Float OpenMP::OpenMP_CXX
+    PRIVATE FFTW::Double FFTW::Float
   )
   if(SHAFFT_FFTW_USE_OMP)
     target_link_libraries(shafftf03 PRIVATE FFTW::DoubleOpenMP FFTW::FloatOpenMP)
+    if(OpenMP_CXX_FOUND)
+      target_link_libraries(shafftf03 PRIVATE OpenMP::OpenMP_CXX)
+    endif()
   else()
     target_link_libraries(shafftf03 PRIVATE FFTW::DoubleThreads FFTW::FloatThreads)
   endif()

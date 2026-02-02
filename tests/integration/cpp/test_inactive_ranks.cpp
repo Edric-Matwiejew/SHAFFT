@@ -21,8 +21,8 @@ struct DeviceBuffers {
     shafft::complexf* data = nullptr;
     shafft::complexf* work = nullptr;
     ~DeviceBuffers() {
-        shafft::freeBuffer(data);
-        shafft::freeBuffer(work);
+        (void)shafft::freeBuffer(data);
+        (void)shafft::freeBuffer(work);
     }
 };
 

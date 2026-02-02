@@ -25,6 +25,17 @@ static int g_failed = 0;
 #define TEST_SKIP(msg) \
     do { if (g_rank == 0) printf("SKIP (%s)\n", msg); return; } while(0)
 
+#define TEST_FAIL_RC(msg, rc) \
+    do { \
+      if (g_rank == 0) { \
+        char _buf[256] = {0}; \
+        shafft_last_error_message(_buf, sizeof(_buf)); \
+        printf("FAIL (%s rc=%d err=\"%s\")\n", msg, rc, _buf); \
+      } \
+      g_failed++; \
+      return; \
+    } while(0)
+
 /* Single-precision complex type */
 typedef struct { float real; float imag; } complexf;
 
@@ -152,11 +163,11 @@ static void test_plan_create_destroy(void) {
     
     void* plan = NULL;
     int rc = shafftPlanCreate(&plan);
-    if (rc != 0) TEST_FAIL("create failed");
+    if (rc != 0) TEST_FAIL_RC("create failed", rc);
     if (plan == NULL) TEST_FAIL("plan is NULL");
     
     rc = shafftDestroy(&plan);
-    if (rc != 0) TEST_FAIL("destroy failed");
+    if (rc != 0) TEST_FAIL_RC("destroy failed", rc);
     if (plan != NULL) TEST_FAIL("plan not set to NULL");
     
     TEST_PASS();
@@ -172,7 +183,7 @@ static void test_plan_nda(void) {
     int rc = shafftPlanNDA(plan, 3, 1, dims, SHAFFT_C2C, MPI_COMM_WORLD);
     if (rc != 0) {
         shafftDestroy(&plan);
-        TEST_FAIL("init failed");
+        TEST_FAIL_RC("init failed", rc);
     }
     
     shafftDestroy(&plan);
@@ -194,7 +205,7 @@ static void test_plan_cart(void) {
     int rc = shafftPlanCart(plan, 3, comm_dims, dims, SHAFFT_C2C, MPI_COMM_WORLD);
     if (rc != 0) {
         shafftDestroy(&plan);
-        TEST_FAIL("init failed");
+        TEST_FAIL_RC("init failed", rc);
     }
     
     shafftDestroy(&plan);

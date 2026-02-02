@@ -82,7 +82,7 @@ The hipFFT backend uses [hipFFT](https://github.com/ROCm/hipFFT) for GPU-acceler
 | Requirement | Notes |
 |-------------|-------|
 | HIP + hipFFT | ROCm 6.0+ (AMD) or CUDA (NVIDIA) |
-| GPU-aware MPI | Recommended for optimal performance |
+| GPU-aware MPI | Recommended; host staging is used when disabled |
 
 ### Build Options
 
@@ -97,11 +97,7 @@ The hipFFT backend uses [hipFFT](https://github.com/ROCm/hipFFT) for GPU-acceler
 
 #### GPU-Aware MPI Option
 
-By default, SHAFFT passes device pointers directly to MPI, which requires GPU-aware MPI (e.g., Cray MPICH with GTL, OpenMPI+UCX with CUDA/ROCm support).
-
-If your MPI does not support device buffers, set `-DSHAFFT_GPU_AWARE_MPI=OFF`. SHAFFT will then stage data through host memory automatically, with a small performance penalty.
-
-See the [GPU-Aware MPI](#gpu-aware-mpi) section below for runtime configuration.
+By default, SHAFFT passes device pointers directly to MPI, which requires GPU-aware MPI (e.g., OpenMPI+UCX with ROCm/CUDA, MVAPICH-GDR, or Cray MPICH with GTL). If your MPI does not support device buffers, set `-DSHAFFT_GPU_AWARE_MPI=OFF`; SHAFFT will stage through host memory automatically. See the [GPU-Aware MPI](#gpu-aware-mpi) section below.
 
 ### Build Example (AMD GPU)
 
@@ -154,7 +150,7 @@ The hipFFT backend uses standard HIP/ROCm environment variables:
 | `CUDA_VISIBLE_DEVICES` | GPU device indices (NVIDIA) | All devices |
 
 ```bash
-# Use only GPU 0
+# Restrict execution to GPU 0
 export HIP_VISIBLE_DEVICES=0
 mpirun -np 4 ./my_fft_program
 ```
@@ -164,14 +160,13 @@ mpirun -np 4 ./my_fft_program
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `SHAFFT_FFT_DIAG` | Enable diagnostic output | `0` (disabled) |
-| `SHAFFT_MAX_STRIDE_ELEMS` | Stride threshold for subplan splitting | `20000` |
+| `SHAFFT_SUPERBATCH_THRESHOLD` | Superbatch count threshold for transpose-based FFT | `16` |
 
 #### SHAFFT_FFT_DIAG
 
 Enables detailed diagnostic output for debugging and performance analysis. When enabled, SHAFFT prints per-rank information about:
 - Transform subsequence decomposition
 - Per-subplan parameters (dimensions, strides, batch sizes)
-- Stride-threshold splitting decisions
 - Execution progress
 
 ```bash
@@ -179,33 +174,34 @@ export SHAFFT_FFT_DIAG=1
 mpirun -np 4 ./my_fft_program 2>&1 | grep "\[SHAFFT:diag\]"
 ```
 
-#### SHAFFT_MAX_STRIDE_ELEMS
+#### SHAFFT_SUPERBATCH_THRESHOLD
 
-Controls the stride threshold for automatic subplan splitting. When hipFFT processes non-contiguous (non-trailing) transform axes with large strides, performance can degrade significantly. SHAFFT automatically splits such transforms into smaller subplans when the stride exceeds this threshold.
+Controls when SHAFFT uses an alternative transpose-based FFT strategy for non-trailing axis transforms. When the superbatch count exceeds this threshold, SHAFFT uses gpuTT to transpose data so FFT axes become trailing, executes the FFT without superbatch iteration, then transposes back. This avoids precision degradation from repeated hipfftExec calls on large tensors.
 
 | Value | Effect |
 |-------|--------|
-| Higher | Fewer subplans, may be slower for large-stride transforms |
-| Lower | More subplans, better performance for strided data |
+| Higher | More superbatch iterations, may accumulate numerical error |
+| Lower | Use transpose-based strategy more often, better precision for large tensors |
 
 ```bash
-# Increase threshold for tensors with naturally large strides
-export SHAFFT_MAX_STRIDE_ELEMS=50000
+# Use transpose strategy when superbatch count exceeds 8
+export SHAFFT_SUPERBATCH_THRESHOLD=8
 mpirun -np 4 ./my_fft_program
 ```
 
-**Note:** This optimization is specific to non-trailing axis blocks where `idist == 1` and `odist == 1`. Contiguous transforms are not affected.
+**Note:** This optimization was introduced to prevent precision loss in large-scale hipFFT transforms with high-dimensional tensors.
 
 ### GPU-Aware MPI {#gpu-aware-mpi}
 
 For optimal performance, use a GPU-aware MPI implementation that can transfer data directly between GPUs without staging through host memory.
 
-On systems with GPU transport layers (GTL):
+On Cray MPICH, GTL is only needed when GPU-aware MPI is enabled:
 ```bash
-# Cray MPICH with GTL
 export MPICH_GPU_SUPPORT_ENABLED=1
+```
 
-# OpenMPI with UCX
+OpenMPI UCX example:
+```bash
 export UCX_TLS=rc,cuda_copy,cuda_ipc
 ```
 

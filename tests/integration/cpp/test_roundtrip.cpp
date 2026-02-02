@@ -18,7 +18,7 @@ static bool test_roundtrip_dims(const std::vector<int>& dims, int nda) {
     
     // Get layout
     std::vector<int> subsize(dims.size()), offset(dims.size());
-    plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
     
     size_t local_elems = product(subsize);
     size_t alloc_elems = plan.allocSize();
@@ -26,8 +26,8 @@ static bool test_roundtrip_dims(const std::vector<int>& dims, int nda) {
     
     // Allocate
     shafft::complexf *data = nullptr, *work = nullptr;
-    shafft::allocBuffer(alloc_elems, &data);
-    shafft::allocBuffer(alloc_elems, &work);
+    (void)shafft::allocBuffer(alloc_elems, &data);
+    (void)shafft::allocBuffer(alloc_elems, &work);
     
     // Initialize with pattern based on global position
     std::vector<shafft::complexf> original(alloc_elems, {0.0f, 0.0f});
@@ -50,43 +50,43 @@ static bool test_roundtrip_dims(const std::vector<int>& dims, int nda) {
                                 : shafft::complexf{0.0f, 0.0f};
     }
     
-    shafft::copyToBuffer(data, original.data(), alloc_elems);
-    plan.setBuffers(data, work);
+    (void)shafft::copyToBuffer(data, original.data(), alloc_elems);
+    (void)plan.setBuffers(data, work);
     
     // Forward
     rc = plan.execute(shafft::FFTDirection::FORWARD);
-    if (rc != 0) { shafft::freeBuffer(data); shafft::freeBuffer(work); return false; }
+    if (rc != 0) { (void)shafft::freeBuffer(data); (void)shafft::freeBuffer(work); return false; }
     
     // Normalize after forward (symmetric scaling)
     rc = plan.normalize();
-    if (rc != 0) { shafft::freeBuffer(data); shafft::freeBuffer(work); return false; }
+    if (rc != 0) { (void)shafft::freeBuffer(data); (void)shafft::freeBuffer(work); return false; }
     
     // Backward
     rc = plan.execute(shafft::FFTDirection::BACKWARD);
-    if (rc != 0) { shafft::freeBuffer(data); shafft::freeBuffer(work); return false; }
+    if (rc != 0) { (void)shafft::freeBuffer(data); (void)shafft::freeBuffer(work); return false; }
     
     // Normalize after backward
     rc = plan.normalize();
-    if (rc != 0) { shafft::freeBuffer(data); shafft::freeBuffer(work); return false; }
+    if (rc != 0) { (void)shafft::freeBuffer(data); (void)shafft::freeBuffer(work); return false; }
     
     // Get final data
     shafft::complexf *final_data, *final_work;
-    plan.getBuffers(&final_data, &final_work);
+    (void)plan.getBuffers(&final_data, &final_work);
     
     // Verify layout is back to initial
     std::vector<int> final_subsize(dims.size()), final_offset(dims.size());
-    plan.getLayout(final_subsize, final_offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(final_subsize, final_offset, shafft::TensorLayout::CURRENT);
     
     for (size_t d = 0; d < dims.size(); ++d) {
         if (final_subsize[d] != subsize[d] || final_offset[d] != offset[d]) {
-            shafft::freeBuffer(data); shafft::freeBuffer(work);
+            (void)shafft::freeBuffer(data); (void)shafft::freeBuffer(work);
             return false;
         }
     }
     
     // Copy back and compare
     std::vector<shafft::complexf> result(alloc_elems);
-    shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
+    (void)shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
     
     bool passed = true;
     for (size_t i = 0; i < local_elems; ++i) {
@@ -96,8 +96,8 @@ static bool test_roundtrip_dims(const std::vector<int>& dims, int nda) {
         }
     }
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     return passed;
 }

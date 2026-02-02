@@ -5,6 +5,7 @@ if(SHAFFT_ENABLE_HIPFFT)
 
   add_library(fft_method OBJECT
     fft/hipfft_method/fft_method.cpp
+    fft/hipfft_method/transpose_fft.cpp
     fft/hipfft_method/normalize.hip
   )
 
@@ -13,10 +14,12 @@ if(SHAFFT_ENABLE_HIPFFT)
       CACHE PATH "Path to fft method")
 
   target_include_directories(fft_method PRIVATE
+    ${PROJECT_BINARY_DIR}/include
+    ${PROJECT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${FFT_METHOD_PATH}
   )
-  target_link_libraries(fft_method PRIVATE shafft_options hip::host hip::hipfft MPI::MPI_CXX)
+  target_link_libraries(fft_method PRIVATE shafft_options hip::host hip::hipfft MPI::MPI_CXX gputt)
 
   add_library(shafft OBJECT
     slab.cpp
@@ -26,12 +29,14 @@ if(SHAFFT_ENABLE_HIPFFT)
     shafft_error.cpp
   )
   target_include_directories(shafft PRIVATE
+    ${PROJECT_BINARY_DIR}/include
+    ${PROJECT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${FFT_METHOD_PATH}
   )
-  target_link_libraries(shafft PRIVATE shafft_options MPI::MPI_CXX hip::host hip::hipfft)
+  target_link_libraries(shafft PRIVATE shafft_options MPI::MPI_CXX hip::host hip::hipfft gputt)
   if(SHAFFT_HAVE_GTL)
-    target_link_libraries(shafft PRIVATE ${mpi_gtl_LIBRARIES})
+    target_link_libraries(shafft PRIVATE CrayGTL::CrayGTL)
   endif()
 
   add_library(shafftc++ SHARED
@@ -39,24 +44,31 @@ if(SHAFFT_ENABLE_HIPFFT)
     $<TARGET_OBJECTS:shafft>
     $<TARGET_OBJECTS:fft_method>
   )
-  target_include_directories(shafftc++ PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
+  target_include_directories(shafftc++ PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
   )
-  target_link_libraries(shafftc++ PUBLIC shafft_options MPI::MPI_CXX PRIVATE hip::host hip::hipfft)
+  target_include_directories(shafftc++ PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(shafftc++ PUBLIC shafft_options MPI::MPI_CXX PRIVATE hip::host hip::hipfft gputt)
   if(SHAFFT_HAVE_GTL)
-    target_link_libraries(shafftc++ PRIVATE ${mpi_gtl_LIBRARIES})
+    target_link_libraries(shafftc++ PRIVATE CrayGTL::CrayGTL)
   endif()
   add_dependencies(shafftc++ shafft)
 
 # ---------------- FFTW backend ----------------
 elseif(SHAFFT_ENABLE_FFTW)
 
-  find_package(OpenMP REQUIRED)
+  if(SHAFFT_FFTW_USE_OMP)
+    find_package(OpenMP REQUIRED)
+  endif()
 
   add_library(fft_method OBJECT
     fft/fftw_method/fft_method.cpp
   )
   target_include_directories(fft_method PRIVATE
+    ${PROJECT_BINARY_DIR}/include
+    ${PROJECT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR} ${FFTW_INCLUDE_DIRS}
     ${CMAKE_CURRENT_SOURCE_DIR}/fft/fftw_method
   )
@@ -70,6 +82,8 @@ elseif(SHAFFT_ENABLE_FFTW)
     shafft_error.cpp
   )
   target_include_directories(shafft PRIVATE
+    ${PROJECT_BINARY_DIR}/include
+    ${PROJECT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/fft/fftw_method
     ${FFTW_INCLUDE_DIRS}
@@ -105,6 +119,10 @@ else()
 endif()
 
 target_include_directories(shafftc++ 
+  PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/fft/fftw_method

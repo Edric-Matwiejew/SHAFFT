@@ -16,11 +16,12 @@
 #define SHAFFT_C_H
 
 #include <shafft/shafft_config.h>
-#include <stddef.h>
+
 #include <mpi.h>
+#include <stddef.h>
 
 #if SHAFFT_BACKEND_HIPFFT
-#  include <hip/hip_runtime_api.h>
+#include <hip/hip_runtime_api.h>
 #endif
 
 #ifdef __cplusplus
@@ -55,60 +56,63 @@ typedef enum { SHAFFT_C2C, SHAFFT_Z2Z } shafft_t;
  * - SHAFFT_BACKWARD : backward transform.
  */
 typedef enum {
-  SHAFFT_FORWARD,  /**< Forward transform. */
-  SHAFFT_BACKWARD  /**< Backward transform. */
+  SHAFFT_FORWARD, /**< Forward transform. */
+  SHAFFT_BACKWARD /**< Backward transform. */
 } shafft_direction_t;
 
 /**
  * @brief Tensor layout for querying local decomposition.
  * @ingroup c_api
- * - SHAFFT_CURRENT     : layout associated with the last executed transform direction.
- * - SHAFFT_INITIAL     : layout before any transforms have been executed.
- * - SHAFFT_TRANSFORMED : layout after a full forward or backward transform has been executed.
+ * - SHAFFT_TENSOR_LAYOUT_CURRENT     : layout associated with the last executed transform
+ * direction.
+ * - SHAFFT_TENSOR_LAYOUT_INITIAL     : layout before any transforms have been executed.
+ * - SHAFFT_TENSOR_LAYOUT_TRANSFORMED : layout after a full forward or backward transform has been
+ * executed.
  */
 typedef enum {
-  SHAFFT_TENSOR_LAYOUT_CURRENT,   /**< Current layout (forward or backward, depending on last execution). */
-  SHAFFT_TENSOR_LAYOUT_INITIAL,   /**< Initial layout (before any transforms). */
+  SHAFFT_TENSOR_LAYOUT_CURRENT,    /**< Current layout (forward or backward, depending on last
+                                      execution). */
+  SHAFFT_TENSOR_LAYOUT_INITIAL,    /**< Initial layout (before any transforms). */
   SHAFFT_TENSOR_LAYOUT_TRANSFORMED /**< Transformed layout (after execution). */
 } shafft_tensor_layout_t;
 
 /**
- * @brief Status/error codes returned by SHAFFT functions.
+ * @brief Status/error codes returned by SHAFFT functions (aligned with shafft::Status).
  * @ingroup c_api
  * 0 indicates success; non-zero indicates an error condition.
  */
 typedef enum {
-  SHAFFT_SUCCESS                = 0,   /**< Operation completed successfully. */
-  SHAFFT_ERR_NULLPTR            = 1,   /**< Null pointer argument. */
-  SHAFFT_ERR_INVALID_COMM       = 2,   /**< Invalid MPI communicator. */
-  SHAFFT_ERR_INVALID_DIM        = 3,   /**< Invalid dimension parameter. */
-  SHAFFT_ERR_INVALID_FFTTYPE    = 4,   /**< Invalid FFT type. */
-  SHAFFT_ERR_PLAN_NOT_INIT      = 5,   /**< Plan not initialized. */
-  SHAFFT_ERR_RUNTIME            = 6,   /**< Runtime/backend error. */
-  SHAFFT_ERR_DIM_MISMATCH       = 7,   /**< Dimension mismatch between arrays. */
-  SHAFFT_ERR_ALLOC_FAILED       = 8    /**< Memory allocation failed. */
+  SHAFFT_SUCCESS = 0,             /**< Operation completed successfully. */
+  SHAFFT_ERR_NULLPTR = 1,         /**< Null pointer argument. */
+  SHAFFT_ERR_INVALID_COMM = 2,    /**< Invalid MPI communicator. */
+  SHAFFT_ERR_NO_BUFFER = 3,       /**< Required data/work buffer was not set. */
+  SHAFFT_ERR_PLAN_NOT_INIT = 4,   /**< Plan or subplan not initialized. */
+  SHAFFT_ERR_INVALID_DIM = 5,     /**< Invalid dimension parameter. */
+  SHAFFT_ERR_DIM_MISMATCH = 6,    /**< Dimension mismatch between arrays. */
+  SHAFFT_ERR_INVALID_DECOMP = 7,  /**< Invalid or unsupported slab decomposition. */
+  SHAFFT_ERR_INVALID_FFTTYPE = 8, /**< Invalid FFT type. */
+  SHAFFT_ERR_ALLOC = 9,           /**< Memory allocation failed. */
+  SHAFFT_ERR_BACKEND = 10,        /**< Backend (FFTW/hipFFT/HIP) failure. */
+  SHAFFT_ERR_MPI = 11,            /**< MPI failure. */
+  SHAFFT_ERR_INTERNAL = 12        /**< Uncategorized internal error. */
 } shafft_status_t;
 
-/* Error source enum is defined in shafft_error.hpp - declare here for C API */
-#ifndef SHAFFT_ERROR_HPP
 /**
  * @brief Error source domain for detailed diagnostics.
+ * @ingroup c_api
  *
  * When a SHAFFT function returns an error, call shafft_last_error_source()
  * to determine which subsystem caused the failure.
  */
 typedef enum {
-  SHAFFT_ERRSRC_NONE    = 0,  /**< No error or SHAFFT-internal error */
-  SHAFFT_ERRSRC_MPI     = 1,  /**< MPI library error */
-  SHAFFT_ERRSRC_HIP     = 2,  /**< HIP runtime error */
-  SHAFFT_ERRSRC_HIPFFT  = 3,  /**< hipFFT library error */
-  SHAFFT_ERRSRC_FFTW    = 4,  /**< FFTW library error */
-  SHAFFT_ERRSRC_SYSTEM  = 5   /**< OS / allocation errors */
+  SHAFFT_ERRSRC_NONE = 0,   /**< No error or SHAFFT-internal error */
+  SHAFFT_ERRSRC_MPI = 1,    /**< MPI library error (use MPI_Error_string) */
+  SHAFFT_ERRSRC_HIP = 2,    /**< HIP runtime error (hipError_t) */
+  SHAFFT_ERRSRC_HIPFFT = 3, /**< hipFFT library error (hipfftResult_t) */
+  SHAFFT_ERRSRC_FFTW = 4,   /**< FFTW library error */
+  SHAFFT_ERRSRC_SYSTEM = 5  /**< OS / allocation / errno-like errors */
 } shafft_errsrc_t;
-#endif
 
-/* Error query functions - declared in shafft_error.hpp with full docs */
-#ifndef SHAFFT_ERROR_HPP
 /**
  * @brief Get the SHAFFT status code from the last error on this thread.
  * @ingroup c_api
@@ -160,7 +164,6 @@ void shafft_clear_last_error(void);
  * @return String name (e.g., "MPI", "HIP", "hipFFT", "FFTW").
  */
 const char* shafft_error_source_name(int source);
-#endif /* SHAFFT_ERROR_HPP */
 
 /**
  * @brief Compute an N-dimensional slab decomposition with a specified number of distributed axes.
@@ -210,9 +213,8 @@ const char* shafft_error_source_name(int source);
  * @param c_comm      MPI communicator.
  * @return 0 on success; non-zero error code on failure.
  */
-int shafftConfigurationNDA(int ndim, int *size, int *nda, int *subsize,
-                           int *offset, int *COMM_DIMS, shafft_t precision,
-                           size_t mem_limit, MPI_Comm c_comm);
+int shafftConfigurationNDA(int ndim, int* size, int* nda, int* subsize, int* offset, int* COMM_DIMS,
+                           shafft_t precision, size_t mem_limit, MPI_Comm c_comm);
 
 /**
  * @brief Compute a Cartesian decomposition and report communicator size.
@@ -262,19 +264,22 @@ int shafftConfigurationNDA(int ndim, int *size, int *nda, int *subsize,
  * @param c_comm      MPI communicator.
  * @return 0 on success; non-zero error code on failure.
  */
-int shafftConfigurationCart(int ndim, int *size, int *subsize, int *offset,
-                            int *COMM_DIMS, int *COMM_SIZE, shafft_t precision,
-                            size_t mem_limit, MPI_Comm c_comm);
+int shafftConfigurationCart(int ndim, int* size, int* subsize, int* offset, int* COMM_DIMS,
+                            int* COMM_SIZE, shafft_t precision, size_t mem_limit, MPI_Comm c_comm);
 
 /**
- * @brief Create a new SHAFFT plan.
+ * @brief Allocate an uninitialized SHAFFT plan object.
  * @ingroup c_api
  *
- * The returned pointer must be passed to ::shafftDestroy() to release resources.
+ * On success, @p out_plan receives the plan pointer. Pass it to
+ * ::shafftDestroy() to release resources.
  *
- * @return plan pointer on success; NULL on failure.
+ * @param out_plan [out] Receives the newly allocated plan pointer (set to NULL on failure).
+ * @return 0 on success;
+ *         SHAFFT_ERR_NULLPTR if @p out_plan is NULL;
+ *         SHAFFT_ERR_ALLOC if allocation fails.
  */
-int    shafftPlanCreate(void** out_plan);
+int shafftPlanCreate(void** out_plan);
 
 /**
  * @brief Build a plan from an NDA decomposition.
@@ -290,8 +295,8 @@ int    shafftPlanCreate(void** out_plan);
  * @param c_comm      MPI communicator used by the plan.
  * @return 0 on success; non-zero on failure.
  */
-int shafftPlanNDA(void *plan_ptr, int ndim, int nda, int dimensions[],
-                  shafft_t precision, MPI_Comm c_comm);
+int shafftPlanNDA(void* plan_ptr, int ndim, int nda, int dimensions[], shafft_t precision,
+                  MPI_Comm c_comm);
 
 /**
  * @brief Build a plan from an explicit Cartesian process grid.
@@ -307,8 +312,8 @@ int shafftPlanNDA(void *plan_ptr, int ndim, int nda, int dimensions[],
  * @param c_comm      MPI communicator used by the plan.
  * @return 0 on success; non-zero on failure.
  */
-int shafftPlanCart(void *plan_ptr, int ndim, int COMM_DIMS[], int dimensions[],
-                   shafft_t precision, MPI_Comm c_comm);
+int shafftPlanCart(void* plan_ptr, int ndim, int COMM_DIMS[], int dimensions[], shafft_t precision,
+                   MPI_Comm c_comm);
 
 /**
  * @brief Destroy a plan and release resources.
@@ -319,7 +324,7 @@ int shafftPlanCart(void *plan_ptr, int ndim, int COMM_DIMS[], int dimensions[],
  * @param plan_ptr plan pointer.
  * @return 0 on success; non-zero on failure.
  */
-int shafftDestroy(void **plan_ptr);
+int shafftDestroy(void** plan_ptr);
 
 /**
  * @brief Query the local layout for the current plan.
@@ -328,26 +333,28 @@ int shafftDestroy(void **plan_ptr);
  * @param plan_ptr Plan pointer.
  * @param subsize  [out] Local extents per axis for this rank (length = plan rank).
  * @param offset   [out] Global starting indices per axis for this rank (length = plan rank).
- * @param layout   Layout to query (SHAFFT_TENSOR_LAYOUT_CURRENT, SHAFFT_TENSOR_LAYOUT_INITIAL, or SHAFFT_TENSOR_LAYOUT_TRANSFORMED).
+ * @param layout   Layout to query (SHAFFT_TENSOR_LAYOUT_CURRENT, SHAFFT_TENSOR_LAYOUT_INITIAL, or
+ * SHAFFT_TENSOR_LAYOUT_TRANSFORMED).
  * @return 0 on success; non-zero on failure.
  */
-int shafftGetLayout(void *plan_ptr, int *subsize, int *offset, shafft_tensor_layout_t layout);
+int shafftGetLayout(void* plan_ptr, int* subsize, int* offset, shafft_tensor_layout_t layout);
 
 /**
-  * @brief Query the locally contiguous and distributed axes for the current plan.
-  * @ingroup c_api
-  *
-  * @param plan_ptr Plan pointer.
-  * @param ca       [out] Indices of locally contiguous (non-distributed) axes,
-  *                 ordered innermost to outermost stride for the reported layout
-  *                 (length = number of contiguous axes for the reported layout).
-  * @param da       [out] Indices of distributed axes, ordered innermost to
-  *                 outermost stride for the reported layout
-  *                 (length = number of distributed axes for the reported layout).
-  * @param layout   Layout to query (SHAFFT_TENSOR_LAYOUT_CURRENT, SHAFFT_TENSOR_LAYOUT_INITIAL, or SHAFFT_TENSOR_LAYOUT_TRANSFORMED).
-  * @return 0 on success; non-zero on failure.
-  */
-int shafftGetAxes(void *plan_ptr, int *ca, int *da, shafft_tensor_layout_t layout);
+ * @brief Query the locally contiguous and distributed axes for the current plan.
+ * @ingroup c_api
+ *
+ * @param plan_ptr Plan pointer.
+ * @param ca       [out] Indices of locally contiguous (non-distributed) axes,
+ *                 ordered innermost to outermost stride for the reported layout
+ *                 (length = number of contiguous axes for the reported layout).
+ * @param da       [out] Indices of distributed axes, ordered innermost to
+ *                 outermost stride for the reported layout
+ *                 (length = number of distributed axes for the reported layout).
+ * @param layout   Layout to query (SHAFFT_TENSOR_LAYOUT_CURRENT, SHAFFT_TENSOR_LAYOUT_INITIAL, or
+ * SHAFFT_TENSOR_LAYOUT_TRANSFORMED).
+ * @return 0 on success; non-zero on failure.
+ */
+int shafftGetAxes(void* plan_ptr, int* ca, int* da, shafft_tensor_layout_t layout);
 
 /**
  * @brief Report the total buffer size required by the plan (in elements).
@@ -360,7 +367,7 @@ int shafftGetAxes(void *plan_ptr, int *ca, int *da, shafft_tensor_layout_t layou
  * @param alloc_size [out] Required element count; 0 on error.
  * @return 0 on success; non-zero on failure.
  */
- int shafftGetAllocSize(void* plan, size_t* alloc_size);
+int shafftGetAllocSize(void* plan, size_t* alloc_size);
 
 /**
  * @brief Attach data and work buffers to a plan.
@@ -370,11 +377,16 @@ int shafftGetAxes(void *plan_ptr, int *ca, int *da, shafft_tensor_layout_t layou
  * The caller allocates and owns the buffers. Buffers must remain valid for the
  * lifetime of the plan or until new buffers are set.
  *
+ * Errors:
+ * - SHAFFT_ERR_NULLPTR     : @p plan_ptr, @p data, or @p work is NULL.
+ * - SHAFFT_ERR_PLAN_NOT_INIT : Plan has not been initialized.
+ *
  * @param plan_ptr Plan pointer.
  * @param data     Pointer to the main data buffer.
  * @param work     Pointer to the work/scratch buffer.
+ * @return 0 on success; non-zero status on failure (see Errors).
  */
-int shafftSetBuffers(void *plan_ptr, void *data, void *work);
+int shafftSetBuffers(void* plan_ptr, void* data, void* work);
 
 /**
  * @brief Retrieve the currently attached buffer pointers.
@@ -384,11 +396,17 @@ int shafftSetBuffers(void *plan_ptr, void *data, void *work);
  * Call this after ::shafftExecute() to locate the buffer that holds the
  * transformed data.
  *
+ * Errors:
+ * - SHAFFT_ERR_NULLPTR       : @p plan_ptr, @p data, or @p work is NULL.
+ * - SHAFFT_ERR_PLAN_NOT_INIT : Plan has not been initialized.
+ * - SHAFFT_ERR_NO_BUFFER     : No buffers have been attached.
+ *
  * @param plan_ptr Plan pointer.
  * @param data     [out] Receives current data buffer pointer.
  * @param work     [out] Receives current work buffer pointer.
+ * @return 0 on success; non-zero status on failure (see Errors).
  */
-int shafftGetBuffers(void *plan_ptr, void **data, void **work);
+int shafftGetBuffers(void* plan_ptr, void** data, void** work);
 
 /**
  * @brief Execute the FFT associated with the plan.
@@ -401,7 +419,7 @@ int shafftGetBuffers(void *plan_ptr, void **data, void **work);
  * @param direction Transform direction (SHAFFT_FORWARD or SHAFFT_BACKWARD).
  * @return 0 on success; non-zero on failure.
  */
-int shafftExecute(void *plan_ptr, shafft_direction_t direction);
+int shafftExecute(void* plan_ptr, shafft_direction_t direction);
 
 /**
  * @brief Normalize the current data buffer.
@@ -410,7 +428,7 @@ int shafftExecute(void *plan_ptr, shafft_direction_t direction);
  * @param plan_ptr Plan pointer.
  * @return 0 on success; non-zero on failure.
  */
-int shafftNormalize(void *plan_ptr);
+int shafftNormalize(void* plan_ptr);
 
 //------------------------------------------------------------------------------
 // Portable memory allocation helpers
@@ -542,7 +560,7 @@ const char* shafftGetBackendName(void);
 void shafftGetVersion(int* major, int* minor, int* patch);
 
 /**
- * @brief Get the library version as a string (e.g., "0.0.1-alpha").
+ * @brief Get the library version as a string (e.g., "0.1.0-alpha").
  * @ingroup c_api
  * @return Version string.
  */
@@ -552,4 +570,4 @@ const char* shafftGetVersionString(void);
 } /* extern "C" */
 #endif
 
-#endif // SHAFFT_C_H
+#endif  // SHAFFT_C_H

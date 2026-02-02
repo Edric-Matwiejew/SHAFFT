@@ -146,32 +146,32 @@ static bool test_delta_uniform_spectrum() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(dims.size()), offset(dims.size());
-    plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
     
     size_t local_elems = product(subsize);
     size_t alloc_elems = plan.allocSize();
     
     shafft::complexd *data = nullptr, *work = nullptr;
-    shafft::allocBuffer(alloc_elems, &data);
-    shafft::allocBuffer(alloc_elems, &work);
+    (void)shafft::allocBuffer(alloc_elems, &data);
+    (void)shafft::allocBuffer(alloc_elems, &work);
     
     std::vector<shafft::complexd> host_data(alloc_elems);
     init_delta(host_data.data(), local_elems, dims, subsize, offset, delta_pos);
-    shafft::copyToBuffer(data, host_data.data(), alloc_elems);
+    (void)shafft::copyToBuffer(data, host_data.data(), alloc_elems);
     
-    plan.setBuffers(data, work);
-    plan.execute(shafft::FFTDirection::FORWARD);
+    (void)plan.setBuffers(data, work);
+    (void)plan.execute(shafft::FFTDirection::FORWARD);
     
     shafft::complexd *final_data, *final_work;
-    plan.getBuffers(&final_data, &final_work);
+    (void)plan.getBuffers(&final_data, &final_work);
     
     // Get final layout
     std::vector<int> final_subsize(dims.size()), final_offset(dims.size());
-    plan.getLayout(final_subsize, final_offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(final_subsize, final_offset, shafft::TensorLayout::CURRENT);
     size_t final_local_elems = product(final_subsize);
     
     std::vector<shafft::complexd> result(alloc_elems);
-    shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
+    (void)shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
     
     // FFT of delta at origin should be constant 1.0 everywhere
     double max_dev = 0;
@@ -185,8 +185,8 @@ static bool test_delta_uniform_spectrum() {
     double global_max_dev;
     MPI_Allreduce(&max_dev, &global_max_dev, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     return global_max_dev < DP_TOL;
 }
@@ -207,31 +207,31 @@ static bool test_plane_wave_to_delta() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(dims.size()), offset(dims.size());
-    plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
     
     size_t local_elems = product(subsize);
     size_t alloc_elems = plan.allocSize();
     
     shafft::complexd *data = nullptr, *work = nullptr;
-    shafft::allocBuffer(alloc_elems, &data);
-    shafft::allocBuffer(alloc_elems, &work);
+    (void)shafft::allocBuffer(alloc_elems, &data);
+    (void)shafft::allocBuffer(alloc_elems, &work);
     
     std::vector<shafft::complexd> host_data(alloc_elems);
     init_plane_wave(host_data.data(), local_elems, dims, subsize, offset, kvec);
-    shafft::copyToBuffer(data, host_data.data(), alloc_elems);
+    (void)shafft::copyToBuffer(data, host_data.data(), alloc_elems);
     
-    plan.setBuffers(data, work);
-    plan.execute(shafft::FFTDirection::FORWARD);
+    (void)plan.setBuffers(data, work);
+    (void)plan.execute(shafft::FFTDirection::FORWARD);
     
     shafft::complexd *final_data, *final_work;
-    plan.getBuffers(&final_data, &final_work);
+    (void)plan.getBuffers(&final_data, &final_work);
     
     std::vector<int> final_subsize(dims.size()), final_offset(dims.size());
-    plan.getLayout(final_subsize, final_offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(final_subsize, final_offset, shafft::TensorLayout::CURRENT);
     size_t final_local_elems = product(final_subsize);
     
     std::vector<shafft::complexd> result(alloc_elems);
-    shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
+    (void)shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
     
     // Find local max magnitude
     double local_max = 0;
@@ -244,8 +244,8 @@ static bool test_plane_wave_to_delta() {
     double global_max;
     MPI_Allreduce(&local_max, &global_max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     // Peak should be approximately N_total
     double expected_peak = static_cast<double>(N_total);
@@ -270,30 +270,30 @@ static bool test_constant_to_dc() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(dims.size()), offset(dims.size());
-    plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
     
     size_t local_elems = product(subsize);
     size_t alloc_elems = plan.allocSize();
     
     shafft::complexd *data = nullptr, *work = nullptr;
-    shafft::allocBuffer(alloc_elems, &data);
-    shafft::allocBuffer(alloc_elems, &work);
+    (void)shafft::allocBuffer(alloc_elems, &data);
+    (void)shafft::allocBuffer(alloc_elems, &work);
     
     std::vector<shafft::complexd> host_data(alloc_elems, constant_val);
-    shafft::copyToBuffer(data, host_data.data(), alloc_elems);
+    (void)shafft::copyToBuffer(data, host_data.data(), alloc_elems);
     
-    plan.setBuffers(data, work);
-    plan.execute(shafft::FFTDirection::FORWARD);
+    (void)plan.setBuffers(data, work);
+    (void)plan.execute(shafft::FFTDirection::FORWARD);
     
     shafft::complexd *final_data, *final_work;
-    plan.getBuffers(&final_data, &final_work);
+    (void)plan.getBuffers(&final_data, &final_work);
     
     std::vector<int> final_subsize(dims.size()), final_offset(dims.size());
-    plan.getLayout(final_subsize, final_offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(final_subsize, final_offset, shafft::TensorLayout::CURRENT);
     size_t final_local_elems = product(final_subsize);
     
     std::vector<shafft::complexd> result(alloc_elems);
-    shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
+    (void)shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
     
     // Find max magnitude (should be DC)
     double local_max = 0;
@@ -306,8 +306,8 @@ static bool test_constant_to_dc() {
     double global_max;
     MPI_Allreduce(&local_max, &global_max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     // DC should be constant_val * N_total
     double expected_mag = std::sqrt(constant_val.real() * constant_val.real() + 
@@ -332,14 +332,14 @@ static bool test_parseval() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(dims.size()), offset(dims.size());
-    plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
     
     size_t local_elems = product(subsize);
     size_t alloc_elems = plan.allocSize();
     
     shafft::complexd *data = nullptr, *work = nullptr;
-    shafft::allocBuffer(alloc_elems, &data);
-    shafft::allocBuffer(alloc_elems, &work);
+    (void)shafft::allocBuffer(alloc_elems, &data);
+    (void)shafft::allocBuffer(alloc_elems, &work);
     
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -357,27 +357,27 @@ static bool test_parseval() {
     double global_input_energy;
     MPI_Allreduce(&local_input_energy, &global_input_energy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
     
-    shafft::copyToBuffer(data, host_data.data(), alloc_elems);
-    plan.setBuffers(data, work);
-    plan.execute(shafft::FFTDirection::FORWARD);
+    (void)shafft::copyToBuffer(data, host_data.data(), alloc_elems);
+    (void)plan.setBuffers(data, work);
+    (void)plan.execute(shafft::FFTDirection::FORWARD);
     
     shafft::complexd *final_data, *final_work;
-    plan.getBuffers(&final_data, &final_work);
+    (void)plan.getBuffers(&final_data, &final_work);
     
     std::vector<int> final_subsize(dims.size()), final_offset(dims.size());
-    plan.getLayout(final_subsize, final_offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(final_subsize, final_offset, shafft::TensorLayout::CURRENT);
     size_t final_local_elems = product(final_subsize);
     
     std::vector<shafft::complexd> result(alloc_elems);
-    shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
+    (void)shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
     
     // Compute output energy
     double local_output_energy = local_energy(result.data(), final_local_elems);
     double global_output_energy;
     MPI_Allreduce(&local_output_energy, &global_output_energy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     // Parseval: sum|f|^2 = (1/N) sum|F|^2
     double expected_output = global_input_energy * N_total;
@@ -404,31 +404,31 @@ static bool test_5d_plane_wave() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(dims.size()), offset(dims.size());
-    plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
     
     size_t local_elems = product(subsize);
     size_t alloc_elems = plan.allocSize();
     
     shafft::complexd *data = nullptr, *work = nullptr;
-    shafft::allocBuffer(alloc_elems, &data);
-    shafft::allocBuffer(alloc_elems, &work);
+    (void)shafft::allocBuffer(alloc_elems, &data);
+    (void)shafft::allocBuffer(alloc_elems, &work);
     
     std::vector<shafft::complexd> host_data(alloc_elems);
     init_plane_wave(host_data.data(), local_elems, dims, subsize, offset, kvec);
-    shafft::copyToBuffer(data, host_data.data(), alloc_elems);
+    (void)shafft::copyToBuffer(data, host_data.data(), alloc_elems);
     
-    plan.setBuffers(data, work);
-    plan.execute(shafft::FFTDirection::FORWARD);
+    (void)plan.setBuffers(data, work);
+    (void)plan.execute(shafft::FFTDirection::FORWARD);
     
     shafft::complexd *final_data, *final_work;
-    plan.getBuffers(&final_data, &final_work);
+    (void)plan.getBuffers(&final_data, &final_work);
     
     std::vector<int> final_subsize(dims.size()), final_offset(dims.size());
-    plan.getLayout(final_subsize, final_offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(final_subsize, final_offset, shafft::TensorLayout::CURRENT);
     size_t final_local_elems = product(final_subsize);
     
     std::vector<shafft::complexd> result(alloc_elems);
-    shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
+    (void)shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
     
     // Find max
     double local_max = 0;
@@ -441,8 +441,8 @@ static bool test_5d_plane_wave() {
     double global_max;
     MPI_Allreduce(&local_max, &global_max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     double expected_peak = static_cast<double>(N_total);
     double peak_error = std::fabs(global_max - expected_peak) / expected_peak;
@@ -465,31 +465,31 @@ static bool test_7d_delta() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(dims.size()), offset(dims.size());
-    plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
     
     size_t local_elems = product(subsize);
     size_t alloc_elems = plan.allocSize();
     
     shafft::complexd *data = nullptr, *work = nullptr;
-    shafft::allocBuffer(alloc_elems, &data);
-    shafft::allocBuffer(alloc_elems, &work);
+    (void)shafft::allocBuffer(alloc_elems, &data);
+    (void)shafft::allocBuffer(alloc_elems, &work);
     
     std::vector<shafft::complexd> host_data(alloc_elems);
     init_delta(host_data.data(), local_elems, dims, subsize, offset, delta_pos);
-    shafft::copyToBuffer(data, host_data.data(), alloc_elems);
+    (void)shafft::copyToBuffer(data, host_data.data(), alloc_elems);
     
-    plan.setBuffers(data, work);
-    plan.execute(shafft::FFTDirection::FORWARD);
+    (void)plan.setBuffers(data, work);
+    (void)plan.execute(shafft::FFTDirection::FORWARD);
     
     shafft::complexd *final_data, *final_work;
-    plan.getBuffers(&final_data, &final_work);
+    (void)plan.getBuffers(&final_data, &final_work);
     
     std::vector<int> final_subsize(dims.size()), final_offset(dims.size());
-    plan.getLayout(final_subsize, final_offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(final_subsize, final_offset, shafft::TensorLayout::CURRENT);
     size_t final_local_elems = product(final_subsize);
     
     std::vector<shafft::complexd> result(alloc_elems);
-    shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
+    (void)shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
     
     // All values should have magnitude 1
     double max_dev = 0;
@@ -503,8 +503,8 @@ static bool test_7d_delta() {
     double global_max_dev;
     MPI_Allreduce(&max_dev, &global_max_dev, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     return global_max_dev < DP_TOL;
 }

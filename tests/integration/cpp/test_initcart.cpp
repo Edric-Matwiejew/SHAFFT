@@ -51,7 +51,7 @@ static bool test_2d_grid() {
     
     // Verify layout - first two axes should be distributed
     std::vector<int> subsize(3), offset(3);
-    plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
     
     // With 2x2 grid: each rank gets half of dim 0 and half of dim 1
     // But dim 2 should be full
@@ -112,7 +112,7 @@ static bool test_2d_initcart() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(2), offset(2);
-    plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
     
     // Second axis should be full
     return subsize[1] == dims[1];
@@ -156,27 +156,27 @@ static bool test_initcart_execute() {
     
     size_t n = plan.allocSize();
     shafft::complexf *data, *work;
-    shafft::allocBuffer(n, &data);
-    shafft::allocBuffer(n, &work);
+    (void)shafft::allocBuffer(n, &data);
+    (void)shafft::allocBuffer(n, &work);
     
     std::vector<shafft::complexf> original(n);
     for (size_t i = 0; i < n; ++i) {
         original[i] = {static_cast<float>(i % 7 + 1), 0.0f};
     }
-    shafft::copyToBuffer(data, original.data(), n);
-    plan.setBuffers(data, work);
+    (void)shafft::copyToBuffer(data, original.data(), n);
+    (void)plan.setBuffers(data, work);
     
     // Forward + backward + normalize
-    plan.execute(shafft::FFTDirection::FORWARD);
-    plan.execute(shafft::FFTDirection::BACKWARD);
-    plan.normalize();
+    (void)plan.execute(shafft::FFTDirection::FORWARD);
+    (void)plan.execute(shafft::FFTDirection::BACKWARD);
+    (void)plan.normalize();
     
     // Get result
     shafft::complexf *result_data, *result_work;
-    plan.getBuffers(&result_data, &result_work);
+    (void)plan.getBuffers(&result_data, &result_work);
     
     std::vector<shafft::complexf> result(n);
-    shafft::copyFromBuffer(result.data(), result_data, n);
+    (void)shafft::copyFromBuffer(result.data(), result_data, n);
     
     // Verify recovery
     bool match = true;
@@ -187,8 +187,8 @@ static bool test_initcart_execute() {
         }
     }
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     return match;
 }

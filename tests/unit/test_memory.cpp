@@ -45,7 +45,7 @@ TEST(alloc_float_nonnull) {
     }
     
     // Clean up
-    shafft::freeBuffer(buf);
+    (void)shafft::freeBuffer(buf);
     return true;
 }
 
@@ -66,7 +66,7 @@ TEST(alloc_double_nonnull) {
         return false;
     }
     
-    shafft::freeBuffer(buf);
+    (void)shafft::freeBuffer(buf);
     return true;
 }
 
@@ -80,7 +80,7 @@ TEST(alloc_zero_size) {
     // Zero-size allocation may succeed with null or non-null
     // The key is it shouldn't crash and free should handle it
     if (rc == 0 && buf != nullptr) {
-        shafft::freeBuffer(buf);
+        (void)shafft::freeBuffer(buf);
     }
     // If rc != 0, that's also acceptable (error on zero size)
     
@@ -130,7 +130,7 @@ TEST(copy_roundtrip_float) {
     rc = shafft::copyToBuffer(buf, host_src.data(), N);
     if (rc != 0) {
         std::cerr << "copyToBuffer failed with rc=" << rc << "\n";
-        shafft::freeBuffer(buf);
+        (void)shafft::freeBuffer(buf);
         return false;
     }
     
@@ -139,7 +139,7 @@ TEST(copy_roundtrip_float) {
     rc = shafft::copyFromBuffer(host_dst.data(), buf, N);
     if (rc != 0) {
         std::cerr << "copyFromBuffer failed with rc=" << rc << "\n";
-        shafft::freeBuffer(buf);
+        (void)shafft::freeBuffer(buf);
         return false;
     }
     
@@ -150,12 +150,12 @@ TEST(copy_roundtrip_float) {
             std::cerr << "Mismatch at index " << i << ": "
                       << "src=(" << host_src[i].real() << "," << host_src[i].imag() << ") "
                       << "dst=(" << host_dst[i].real() << "," << host_dst[i].imag() << ")\n";
-            shafft::freeBuffer(buf);
+            (void)shafft::freeBuffer(buf);
             return false;
         }
     }
     
-    shafft::freeBuffer(buf);
+    (void)shafft::freeBuffer(buf);
     return true;
 }
 
@@ -182,14 +182,14 @@ TEST(copy_roundtrip_double) {
     
     rc = shafft::copyToBuffer(buf, host_src.data(), N);
     if (rc != 0) {
-        shafft::freeBuffer(buf);
+        (void)shafft::freeBuffer(buf);
         return false;
     }
     
     std::vector<shafft::complexd> host_dst(N, {-1.0, -1.0});
     rc = shafft::copyFromBuffer(host_dst.data(), buf, N);
     if (rc != 0) {
-        shafft::freeBuffer(buf);
+        (void)shafft::freeBuffer(buf);
         return false;
     }
     
@@ -198,12 +198,12 @@ TEST(copy_roundtrip_double) {
         if (host_dst[i].real() != host_src[i].real() ||
             host_dst[i].imag() != host_src[i].imag()) {
             std::cerr << "Double mismatch at index " << i << "\n";
-            shafft::freeBuffer(buf);
+            (void)shafft::freeBuffer(buf);
             return false;
         }
     }
     
-    shafft::freeBuffer(buf);
+    (void)shafft::freeBuffer(buf);
     return true;
 }
 
@@ -229,7 +229,7 @@ TEST(large_allocation) {
         return false;
     }
     
-    shafft::freeBuffer(buf);
+    (void)shafft::freeBuffer(buf);
     return true;
 }
 
@@ -247,7 +247,7 @@ TEST(multiple_alloc_free) {
             std::cerr << "Failed to allocate buffer " << i << "\n";
             // Clean up already allocated
             for (int j = 0; j < i; ++j) {
-                shafft::freeBuffer(buffers[j]);
+                (void)shafft::freeBuffer(buffers[j]);
             }
             return false;
         }
@@ -286,14 +286,14 @@ TEST(partial_copy) {
     // Copy only first SUBSET elements
     rc = shafft::copyToBuffer(buf, host_src.data(), SUBSET);
     if (rc != 0) {
-        shafft::freeBuffer(buf);
+        (void)shafft::freeBuffer(buf);
         return false;
     }
     
     std::vector<shafft::complexf> host_dst(SUBSET, {-1.0f, -1.0f});
     rc = shafft::copyFromBuffer(host_dst.data(), buf, SUBSET);
     if (rc != 0) {
-        shafft::freeBuffer(buf);
+        (void)shafft::freeBuffer(buf);
         return false;
     }
     
@@ -301,12 +301,12 @@ TEST(partial_copy) {
     for (size_t i = 0; i < SUBSET; ++i) {
         if (host_dst[i].real() != host_src[i].real()) {
             std::cerr << "Partial copy mismatch at " << i << "\n";
-            shafft::freeBuffer(buf);
+            (void)shafft::freeBuffer(buf);
             return false;
         }
     }
     
-    shafft::freeBuffer(buf);
+    (void)shafft::freeBuffer(buf);
     return true;
 }
 

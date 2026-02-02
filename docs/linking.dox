@@ -4,7 +4,7 @@ This guide covers how to compile and link programs that use SHAFFT.
 
 ## Overview
 
-Each SHAFFT language interface is self-contained - you only need to link against one SHAFFT library:
+Link the SHAFFT library that matches the interface you are using:
 
 | Interface | Library | Header/Module |
 |-----------|---------|---------------|
@@ -30,7 +30,7 @@ add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE shafft::shafftc++ MPI::MPI_CXX)
 ```
 
-Configure your project with the SHAFFT install path:
+Configure with the SHAFFT install path:
 
 ```bash
 cmake -DCMAKE_PREFIX_PATH=/opt/shafft ..
@@ -45,6 +45,8 @@ The `shafft::shafftc++`, `shafft::shafftc`, and `shafft::shafftf03` targets auto
 | `shafft::shafftc++` | C++ interface |
 | `shafft::shafftc` | C interface |
 | `shafft::shafftf03` | Fortran interface (if built with `SHAFFT_BUILD_FORTRAN=ON`) |
+
+For build-tree use (without install), add `${SHAFFT_SOURCE_DIR}/build/include` to `CMAKE_PREFIX_PATH` or include dirs so the generated `shafft_config.h` is found; installed use is handled by `find_package`.
 
 ### Checking Backend at Configure Time
 

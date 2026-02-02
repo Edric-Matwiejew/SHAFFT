@@ -20,15 +20,15 @@ static bool test_delta_3d() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(3), offset(3);
-    plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
     
     size_t local_elems = product(subsize);
     size_t alloc_elems = plan.allocSize();
     if (alloc_elems == 0) return false;
     
     shafft::complexf *data = nullptr, *work = nullptr;
-    shafft::allocBuffer(alloc_elems, &data);
-    shafft::allocBuffer(alloc_elems, &work);
+    (void)shafft::allocBuffer(alloc_elems, &data);
+    (void)shafft::allocBuffer(alloc_elems, &work);
     
     // Initialize: delta at origin
     std::vector<shafft::complexf> host(alloc_elems, {0.0f, 0.0f});
@@ -39,23 +39,23 @@ static bool test_delta_3d() {
         host[0] = {1.0f, 0.0f};
     }
     
-    shafft::copyToBuffer(data, host.data(), alloc_elems);
-    plan.setBuffers(data, work);
+    (void)shafft::copyToBuffer(data, host.data(), alloc_elems);
+    (void)plan.setBuffers(data, work);
     
     // Forward FFT
     rc = plan.execute(shafft::FFTDirection::FORWARD);
-    if (rc != 0) { shafft::freeBuffer(data); shafft::freeBuffer(work); return false; }
+    if (rc != 0) { (void)shafft::freeBuffer(data); (void)shafft::freeBuffer(work); return false; }
     
     // Normalize
     rc = plan.normalize();
-    if (rc != 0) { shafft::freeBuffer(data); shafft::freeBuffer(work); return false; }
+    if (rc != 0) { (void)shafft::freeBuffer(data); (void)shafft::freeBuffer(work); return false; }
     
     // Get result
     shafft::complexf *result_data, *result_work;
-    plan.getBuffers(&result_data, &result_work);
+    (void)plan.getBuffers(&result_data, &result_work);
     
     std::vector<shafft::complexf> result(alloc_elems);
-    shafft::copyFromBuffer(result.data(), result_data, alloc_elems);
+    (void)shafft::copyFromBuffer(result.data(), result_data, alloc_elems);
     
     // Expected: constant value 1/sqrt(N) everywhere
     size_t N = product(dims);
@@ -64,7 +64,7 @@ static bool test_delta_3d() {
     
     // Get transformed layout
     std::vector<int> trans_subsize(3), trans_offset(3);
-    plan.getLayout(trans_subsize, trans_offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(trans_subsize, trans_offset, shafft::TensorLayout::CURRENT);
     size_t trans_local = product(trans_subsize);
     
     bool passed = true;
@@ -75,8 +75,8 @@ static bool test_delta_3d() {
         }
     }
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     return passed;
 }
@@ -91,34 +91,34 @@ static bool test_delta_unnormalized() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(2), offset(2);
-    plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
     
     size_t alloc_elems = plan.allocSize();
     
     shafft::complexf *data = nullptr, *work = nullptr;
-    shafft::allocBuffer(alloc_elems, &data);
-    shafft::allocBuffer(alloc_elems, &work);
+    (void)shafft::allocBuffer(alloc_elems, &data);
+    (void)shafft::allocBuffer(alloc_elems, &work);
     
     // Delta at origin
     std::vector<shafft::complexf> host(alloc_elems, {0.0f, 0.0f});
     bool has_origin = (offset[0] == 0 && offset[1] == 0);
     if (has_origin) host[0] = {1.0f, 0.0f};
     
-    shafft::copyToBuffer(data, host.data(), alloc_elems);
-    plan.setBuffers(data, work);
+    (void)shafft::copyToBuffer(data, host.data(), alloc_elems);
+    (void)plan.setBuffers(data, work);
     
     // Forward FFT without normalize
     rc = plan.execute(shafft::FFTDirection::FORWARD);
-    if (rc != 0) { shafft::freeBuffer(data); shafft::freeBuffer(work); return false; }
+    if (rc != 0) { (void)shafft::freeBuffer(data); (void)shafft::freeBuffer(work); return false; }
     
     shafft::complexf *result_data, *result_work;
-    plan.getBuffers(&result_data, &result_work);
+    (void)plan.getBuffers(&result_data, &result_work);
     
     std::vector<shafft::complexf> result(alloc_elems);
-    shafft::copyFromBuffer(result.data(), result_data, alloc_elems);
+    (void)shafft::copyFromBuffer(result.data(), result_data, alloc_elems);
     
     std::vector<int> trans_subsize(2), trans_offset(2);
-    plan.getLayout(trans_subsize, trans_offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(trans_subsize, trans_offset, shafft::TensorLayout::CURRENT);
     size_t trans_local = product(trans_subsize);
     
     // Expected: all ones (unnormalized)
@@ -132,8 +132,8 @@ static bool test_delta_unnormalized() {
         }
     }
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     return passed;
 }

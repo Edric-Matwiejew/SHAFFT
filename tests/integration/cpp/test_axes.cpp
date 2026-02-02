@@ -151,28 +151,28 @@ static bool test_current_axes_tracks_state() {
     // Allocate and execute forward
     size_t n = plan.allocSize();
     shafft::complexf *data, *work;
-    shafft::allocBuffer(n, &data);
-    shafft::allocBuffer(n, &work);
+    (void)shafft::allocBuffer(n, &data);
+    (void)shafft::allocBuffer(n, &work);
     
     std::vector<shafft::complexf> host(n, {0.0f, 0.0f});
-    shafft::copyToBuffer(data, host.data(), n);
+    (void)shafft::copyToBuffer(data, host.data(), n);
     rc = plan.setBuffers(data, work);
-    if (rc != 0) { shafft::freeBuffer(data); shafft::freeBuffer(work); return false; }
+    if (rc != 0) { (void)shafft::freeBuffer(data); (void)shafft::freeBuffer(work); return false; }
     
     rc = plan.execute(shafft::FFTDirection::FORWARD);
-    if (rc != 0) { shafft::freeBuffer(data); shafft::freeBuffer(work); return false; }
+    if (rc != 0) { (void)shafft::freeBuffer(data); (void)shafft::freeBuffer(work); return false; }
     
     // After forward: CURRENT should match TRANSFORMED
     std::vector<int> trans_ca(ndim), trans_da(ndim);
     rc = plan.getAxes(trans_ca, trans_da, shafft::TensorLayout::TRANSFORMED);
-    if (rc != 0) { shafft::freeBuffer(data); shafft::freeBuffer(work); return false; }
+    if (rc != 0) { (void)shafft::freeBuffer(data); (void)shafft::freeBuffer(work); return false; }
     rc = plan.getAxes(curr_ca, curr_da, shafft::TensorLayout::CURRENT);
-    if (rc != 0) { shafft::freeBuffer(data); shafft::freeBuffer(work); return false; }
+    if (rc != 0) { (void)shafft::freeBuffer(data); (void)shafft::freeBuffer(work); return false; }
     
     bool match = (trans_da[0] == curr_da[0]);
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     return match;
 }

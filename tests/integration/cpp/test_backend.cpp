@@ -70,14 +70,14 @@ static bool test_fftw_threads_roundtrip() {
     }
     
     // Re-get layout after plan init
-    plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
     
     size_t local_elems = product(subsize);
     size_t alloc_elems = plan.allocSize();
     
     shafft::complexd *data = nullptr, *work = nullptr;
-    shafft::allocBuffer(alloc_elems, &data);
-    shafft::allocBuffer(alloc_elems, &work);
+    (void)shafft::allocBuffer(alloc_elems, &data);
+    (void)shafft::allocBuffer(alloc_elems, &work);
     
     // Initialize with known pattern
     std::vector<shafft::complexd> original(alloc_elems);
@@ -85,26 +85,26 @@ static bool test_fftw_threads_roundtrip() {
         original[i] = shafft::complexd(static_cast<double>(i), static_cast<double>(i) * 0.5);
     }
     
-    shafft::copyToBuffer(data, original.data(), alloc_elems);
-    plan.setBuffers(data, work);
+    (void)shafft::copyToBuffer(data, original.data(), alloc_elems);
+    (void)plan.setBuffers(data, work);
     
     // Forward + backward + normalize
-    plan.execute(shafft::FFTDirection::FORWARD);
-    plan.execute(shafft::FFTDirection::BACKWARD);
-    plan.normalize();
+    (void)plan.execute(shafft::FFTDirection::FORWARD);
+    (void)plan.execute(shafft::FFTDirection::BACKWARD);
+    (void)plan.normalize();
     
     shafft::complexd *final_data, *final_work;
-    plan.getBuffers(&final_data, &final_work);
+    (void)plan.getBuffers(&final_data, &final_work);
     
     std::vector<shafft::complexd> result(alloc_elems);
-    shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
+    (void)shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
     
     double local_err = max_error(original.data(), result.data(), local_elems);
     double global_err = 0;
     MPI_Allreduce(&local_err, &global_err, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     // Clean up environment
     unsetenv("SHAFFT_FFTW_THREADS");
@@ -139,39 +139,39 @@ static bool test_fftw_single_thread_roundtrip() {
     }
     
     // Re-get layout after plan init
-    plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
     
     size_t local_elems = product(subsize);
     size_t alloc_elems = plan.allocSize();
     
     shafft::complexf *data = nullptr, *work = nullptr;
-    shafft::allocBuffer(alloc_elems, &data);
-    shafft::allocBuffer(alloc_elems, &work);
+    (void)shafft::allocBuffer(alloc_elems, &data);
+    (void)shafft::allocBuffer(alloc_elems, &work);
     
     std::vector<shafft::complexf> original(alloc_elems);
     for (size_t i = 0; i < local_elems; ++i) {
         original[i] = shafft::complexf(static_cast<float>(i % 100), 0.0f);
     }
     
-    shafft::copyToBuffer(data, original.data(), alloc_elems);
-    plan.setBuffers(data, work);
+    (void)shafft::copyToBuffer(data, original.data(), alloc_elems);
+    (void)plan.setBuffers(data, work);
     
-    plan.execute(shafft::FFTDirection::FORWARD);
-    plan.execute(shafft::FFTDirection::BACKWARD);
-    plan.normalize();
+    (void)plan.execute(shafft::FFTDirection::FORWARD);
+    (void)plan.execute(shafft::FFTDirection::BACKWARD);
+    (void)plan.normalize();
     
     shafft::complexf *final_data, *final_work;
-    plan.getBuffers(&final_data, &final_work);
+    (void)plan.getBuffers(&final_data, &final_work);
     
     std::vector<shafft::complexf> result(alloc_elems);
-    shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
+    (void)shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
     
     double local_err = max_error(original.data(), result.data(), local_elems);
     double global_err = 0;
     MPI_Allreduce(&local_err, &global_err, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     unsetenv("SHAFFT_FFTW_THREADS");
     
@@ -193,14 +193,14 @@ static bool test_fftw_max_threads_roundtrip() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(dims.size()), offset(dims.size());
-    plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
     
     size_t local_elems = product(subsize);
     size_t alloc_elems = plan.allocSize();
     
     shafft::complexd *data = nullptr, *work = nullptr;
-    shafft::allocBuffer(alloc_elems, &data);
-    shafft::allocBuffer(alloc_elems, &work);
+    (void)shafft::allocBuffer(alloc_elems, &data);
+    (void)shafft::allocBuffer(alloc_elems, &work);
     
     std::vector<shafft::complexd> original(alloc_elems);
     for (size_t i = 0; i < local_elems; ++i) {
@@ -208,25 +208,25 @@ static bool test_fftw_max_threads_roundtrip() {
                                         std::cos(static_cast<double>(i)));
     }
     
-    shafft::copyToBuffer(data, original.data(), alloc_elems);
-    plan.setBuffers(data, work);
+    (void)shafft::copyToBuffer(data, original.data(), alloc_elems);
+    (void)plan.setBuffers(data, work);
     
-    plan.execute(shafft::FFTDirection::FORWARD);
-    plan.execute(shafft::FFTDirection::BACKWARD);
-    plan.normalize();
+    (void)plan.execute(shafft::FFTDirection::FORWARD);
+    (void)plan.execute(shafft::FFTDirection::BACKWARD);
+    (void)plan.normalize();
     
     shafft::complexd *final_data, *final_work;
-    plan.getBuffers(&final_data, &final_work);
+    (void)plan.getBuffers(&final_data, &final_work);
     
     std::vector<shafft::complexd> result(alloc_elems);
-    shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
+    (void)shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
     
     double local_err = max_error(original.data(), result.data(), local_elems);
     double global_err = 0;
     MPI_Allreduce(&local_err, &global_err, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     unsetenv("SHAFFT_FFTW_THREADS");
     
@@ -266,42 +266,42 @@ static bool test_hip_stream_roundtrip() {
     }
     
     std::vector<int> subsize(dims.size()), offset(dims.size());
-    plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
     
     size_t local_elems = product(subsize);
     size_t alloc_elems = plan.allocSize();
     
     shafft::complexd *data = nullptr, *work = nullptr;
-    shafft::allocBuffer(alloc_elems, &data);
-    shafft::allocBuffer(alloc_elems, &work);
+    (void)shafft::allocBuffer(alloc_elems, &data);
+    (void)shafft::allocBuffer(alloc_elems, &work);
     
     std::vector<shafft::complexd> original(alloc_elems);
     for (size_t i = 0; i < local_elems; ++i) {
         original[i] = shafft::complexd(static_cast<double>(i), static_cast<double>(i) * 0.5);
     }
     
-    shafft::copyToBuffer(data, original.data(), alloc_elems);
-    plan.setBuffers(data, work);
+    (void)shafft::copyToBuffer(data, original.data(), alloc_elems);
+    (void)plan.setBuffers(data, work);
     
-    plan.execute(shafft::FFTDirection::FORWARD);
-    plan.execute(shafft::FFTDirection::BACKWARD);
-    plan.normalize();
+    (void)plan.execute(shafft::FFTDirection::FORWARD);
+    (void)plan.execute(shafft::FFTDirection::BACKWARD);
+    (void)plan.normalize();
     
     // Synchronize stream before reading results
     hipStreamSynchronize(stream);
     
     shafft::complexd *final_data, *final_work;
-    plan.getBuffers(&final_data, &final_work);
+    (void)plan.getBuffers(&final_data, &final_work);
     
     std::vector<shafft::complexd> result(alloc_elems);
-    shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
+    (void)shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
     
     double local_err = max_error(original.data(), result.data(), local_elems);
     double global_err = 0;
     MPI_Allreduce(&local_err, &global_err, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     hipStreamDestroy(stream);
     
     return global_err < DP_TOL;
@@ -323,41 +323,41 @@ static bool test_hip_default_stream_roundtrip() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(dims.size()), offset(dims.size());
-    plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
     
     size_t local_elems = product(subsize);
     size_t alloc_elems = plan.allocSize();
     
     shafft::complexf *data = nullptr, *work = nullptr;
-    shafft::allocBuffer(alloc_elems, &data);
-    shafft::allocBuffer(alloc_elems, &work);
+    (void)shafft::allocBuffer(alloc_elems, &data);
+    (void)shafft::allocBuffer(alloc_elems, &work);
     
     std::vector<shafft::complexf> original(alloc_elems);
     for (size_t i = 0; i < local_elems; ++i) {
         original[i] = shafft::complexf(static_cast<float>(i % 100), 0.0f);
     }
     
-    shafft::copyToBuffer(data, original.data(), alloc_elems);
-    plan.setBuffers(data, work);
+    (void)shafft::copyToBuffer(data, original.data(), alloc_elems);
+    (void)plan.setBuffers(data, work);
     
-    plan.execute(shafft::FFTDirection::FORWARD);
-    plan.execute(shafft::FFTDirection::BACKWARD);
-    plan.normalize();
+    (void)plan.execute(shafft::FFTDirection::FORWARD);
+    (void)plan.execute(shafft::FFTDirection::BACKWARD);
+    (void)plan.normalize();
     
     // Default stream is synchronous, no explicit sync needed
     
     shafft::complexf *final_data, *final_work;
-    plan.getBuffers(&final_data, &final_work);
+    (void)plan.getBuffers(&final_data, &final_work);
     
     std::vector<shafft::complexf> result(alloc_elems);
-    shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
+    (void)shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
     
     double local_err = max_error(original.data(), result.data(), local_elems);
     double global_err = 0;
     MPI_Allreduce(&local_err, &global_err, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     return global_err < SP_TOL;
 }
@@ -385,46 +385,46 @@ static bool test_hip_stream_switching() {
     }
     
     std::vector<int> subsize(dims.size()), offset(dims.size());
-    plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
     
     size_t local_elems = product(subsize);
     size_t alloc_elems = plan.allocSize();
     
     shafft::complexf *data = nullptr, *work = nullptr;
-    shafft::allocBuffer(alloc_elems, &data);
-    shafft::allocBuffer(alloc_elems, &work);
+    (void)shafft::allocBuffer(alloc_elems, &data);
+    (void)shafft::allocBuffer(alloc_elems, &work);
     
     std::vector<shafft::complexf> original(alloc_elems);
     for (size_t i = 0; i < local_elems; ++i) {
         original[i] = shafft::complexf(1.0f, 0.0f);
     }
     
-    shafft::copyToBuffer(data, original.data(), alloc_elems);
-    plan.setBuffers(data, work);
+    (void)shafft::copyToBuffer(data, original.data(), alloc_elems);
+    (void)plan.setBuffers(data, work);
     
     // Use stream1 for forward
     plan.setStream(stream1);
-    plan.execute(shafft::FFTDirection::FORWARD);
+    (void)plan.execute(shafft::FFTDirection::FORWARD);
     hipStreamSynchronize(stream1);
     
     // Switch to stream2 for backward
     plan.setStream(stream2);
-    plan.execute(shafft::FFTDirection::BACKWARD);
-    plan.normalize();
+    (void)plan.execute(shafft::FFTDirection::BACKWARD);
+    (void)plan.normalize();
     hipStreamSynchronize(stream2);
     
     shafft::complexf *final_data, *final_work;
-    plan.getBuffers(&final_data, &final_work);
+    (void)plan.getBuffers(&final_data, &final_work);
     
     std::vector<shafft::complexf> result(alloc_elems);
-    shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
+    (void)shafft::copyFromBuffer(result.data(), final_data, alloc_elems);
     
     double local_err = max_error(original.data(), result.data(), local_elems);
     double global_err = 0;
     MPI_Allreduce(&local_err, &global_err, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     hipStreamDestroy(stream1);
     hipStreamDestroy(stream2);
     

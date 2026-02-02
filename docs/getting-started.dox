@@ -34,6 +34,7 @@ See @ref backends for backend-specific requirements.
 | `CMAKE_INSTALL_PREFIX` | Installation directory | `/usr/local` |
 
 **Note:** Enabling one backend automatically disables the other.
+If your MPI is not GPU-aware, set `-DSHAFFT_GPU_AWARE_MPI=OFF` (hipFFT builds will stage through host memory).
 
 ### Using CMake Presets
 
@@ -68,6 +69,7 @@ cmake -B build -S . \
     -DSHAFFT_ENABLE_FFTW=OFF \
     -DHIP_PLATFORM=amd \
     -DOFFLOAD_ARCH=gfx90a \
+    -DSHAFFT_GPU_AWARE_MPI=OFF \
     -DSHAFFT_BUILD_FORTRAN=ON \
     -DCMAKE_INSTALL_PREFIX=/opt/shafft
 
@@ -83,12 +85,15 @@ cmake -B build -S . \
     -DHIP_PLATFORM=nvidia \
     -DCUDA_PATH=/usr/local/cuda \
     -DOFFLOAD_ARCH=sm_86 \
+    -DSHAFFT_GPU_AWARE_MPI=OFF \
     -DCMAKE_INSTALL_PREFIX=/opt/shafft
 
 cmake --build build --target install
 ```
 
 See @ref backends for all backend-specific build options, including how to enable or disable GPU-aware MPI support (`SHAFFT_GPU_AWARE_MPI` option) and host-staging fallback for non-GPU-aware MPI systems.
+
+In build-tree usage, include `${build_dir}/include` so the generated `shafft_config.h` is found; installed usage is handled by `find_package(shafft)`.
 
 ## Verifying Installation
 
@@ -137,7 +142,7 @@ mpicxx -I/opt/shafft/include -L/opt/shafft/lib -lshafftc++ \
     -o test_shafft test_shafft.cpp
 
 ./test_shafft
-# Output: SHAFFT 0.0.1-alpha (backend: FFTW)
+# Output: SHAFFT 0.1.0-alpha (backend: FFTW)
 ```
 
 ### Using SHAFFT in CMake Projects

@@ -14,9 +14,7 @@
  * @param data Pointer to fftwf_complex array.
  * @return 0 on success (FFTW normalize always succeeds).
  */
-int normalizeComplexFloat(float norm_factor,
-                          std::size_t tensor_size,
-                          void* data);
+int normalizeComplexFloat(float norm_factor, std::size_t tensor_size, void* data);
 
 /**
  * @brief Scale a tensor of complex numbers in-place (double precision).
@@ -29,8 +27,6 @@ int normalizeComplexFloat(float norm_factor,
  * @param data Pointer to fftw_complex array.
  * @return 0 on success (FFTW normalize always succeeds).
  */
-int normalizeComplexDouble(double norm_factor,
-                           std::size_t tensor_size,
-                           void* data);
+int normalizeComplexDouble(double norm_factor, std::size_t tensor_size, void* data);
 
-#endif // NORMALIZE_H
+#endif  // NORMALIZE_H

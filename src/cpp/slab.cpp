@@ -1,5 +1,6 @@
-#include <shafft/shafft_types.hpp>
 #include <shafft/shafft_config.h>
+#include <shafft/shafft_types.hpp>
+
 #include <algorithm>
 #include <cassert>
 #include <cstdlib>
@@ -13,14 +14,14 @@
 
 // ---------------- helpers ----------------
 
-static void decompose(int N, int M, int p, int *n, int *s) {
+static void decompose(int N, int M, int p, int* n, int* s) {
   int q = N / M;
   int r = N % M;
   *n = q + (r > p);
   *s = q * p + std::min(r, p);
 }
 
-static void subcomm(MPI_Comm comm, int ndims, MPI_Comm *subcomms) {
+static void subcomm(MPI_Comm comm, int ndims, MPI_Comm* subcomms) {
   MPI_Comm comm_cart;
   int nprocs = 0;
   MPI_Comm_size(comm, &nprocs);
@@ -42,7 +43,7 @@ static void subcomm(MPI_Comm comm, int ndims, MPI_Comm *subcomms) {
   MPI_Comm_free(&comm_cart);
 }
 
-static void subcomm(MPI_Comm comm, int ndims, int *cart_dims, MPI_Comm *subcomms) {
+static void subcomm(MPI_Comm comm, int ndims, int* cart_dims, MPI_Comm* subcomms) {
   MPI_Comm comm_cart;
   int nprocs = 0;
   MPI_Comm_size(comm, &nprocs);
@@ -67,8 +68,8 @@ static void subcomm(MPI_Comm comm, int ndims, int *cart_dims, MPI_Comm *subcomms
   MPI_Comm_free(&comm_cart);
 }
 
-static void subarray(MPI_Datatype datatype, int ndims, int *sizes, int axis,
-                     int nparts, MPI_Datatype *subarrays) {
+static void subarray(MPI_Datatype datatype, int ndims, int* sizes, int axis, int nparts,
+                     MPI_Datatype* subarrays) {
   std::vector<int> subsizes(sizes, sizes + ndims);
   std::vector<int> substarts(ndims, 0);
   int n = 0, s = 0;
@@ -77,38 +78,41 @@ static void subarray(MPI_Datatype datatype, int ndims, int *sizes, int axis,
     decompose(sizes[axis], nparts, p, &n, &s);
     subsizes[axis] = n;
     substarts[axis] = s;
-    MPI_Type_create_subarray(ndims, sizes, subsizes.data(), substarts.data(),
-                             MPI_ORDER_C, datatype, &subarrays[p]);
+    MPI_Type_create_subarray(ndims, sizes, subsizes.data(), substarts.data(), MPI_ORDER_C, datatype,
+                             &subarrays[p]);
     MPI_Type_commit(&subarrays[p]);
   }
 }
 
-static void exchange(MPI_Comm comm, void *arrayA, MPI_Datatype *subarraysA,
-                     void *arrayB, MPI_Datatype *subarraysB) {
+static void exchange(MPI_Comm comm, void* arrayA, MPI_Datatype* subarraysA, void* arrayB,
+                     MPI_Datatype* subarraysB) {
   int nparts = 0;
   MPI_Comm_size(comm, &nparts);
 
   std::vector<int> counts(nparts, 1);
   std::vector<int> displs(nparts, 0);
 
-  MPI_Alltoallw(arrayA, counts.data(), displs.data(), subarraysA,
-                arrayB, counts.data(), displs.data(), subarraysB, comm);
+  MPI_Alltoallw(arrayA, counts.data(), displs.data(), subarraysA, arrayB, counts.data(),
+                displs.data(), subarraysB, comm);
 }
 
-static int min(int *minv, int ndim) {
+static int min(int* minv, int ndim) {
   int min_ = minv[0];
-  for (int i = 1; i < ndim; i++) min_ = std::min(min_, minv[i]);
+  for (int i = 1; i < ndim; i++)
+    min_ = std::min(min_, minv[i]);
   return min_;
 }
 
-static void exchange_axes(int ndim, int nda, int *da, int *ca, int *axesA,
-                          int *axesB, int ith) {
+static void exchange_axes(int ndim, int nda, int* da, int* ca, int* axesA, int* axesB, int ith) {
   int nca = ndim - nda;
   *axesB = da[nda - ith - 1];
   *axesA = *axesB + nca;
   da[nda - ith - 1] = *axesA;
   for (int j = 0; j < nca; j++) {
-    if (ca[j] == *axesA) { ca[j] = *axesB; break; }
+    if (ca[j] == *axesA) {
+      ca[j] = *axesB;
+      break;
+    }
   }
 }
 
@@ -117,15 +121,16 @@ static int number_of_exchange_sequences(int nda, int nca) {
 }
 
 static void exchange_sequences(int nda, int nca, int nes, int es[]) {
-  for (int i = 0; i < nes; i++) es[i] = std::min(nca, nda - i * nca);
+  for (int i = 0; i < nes; i++)
+    es[i] = std::min(nca, nda - i * nca);
 }
 
 // ---------------- Slab ----------------
 
 namespace shafft {
 
-Slab::Slab(int ndim, int size[], int COMM_DIMS[], MPI_Datatype MPI_sendtype,
-           MPI_Comm comm, size_t elem_size) {
+Slab::Slab(int ndim, int size[], int COMM_DIMS[], MPI_Datatype MPI_sendtype, MPI_Comm comm,
+           size_t elem_size) {
   // Initialize runtime state
   this->_Adata = nullptr;
   this->_Bdata = nullptr;
@@ -150,7 +155,10 @@ Slab::Slab(int ndim, int size[], int COMM_DIMS[], MPI_Datatype MPI_sendtype,
   // count distributed axes (leading >1)
   this->_nda = 0;
   for (int i = 0; i < ndim; i++) {
-    if (COMM_DIMS[i] > 1) this->_nda++; else break;
+    if (COMM_DIMS[i] > 1)
+      this->_nda++;
+    else
+      break;
   }
   this->_nca = ndim - this->_nda;
 
@@ -168,7 +176,7 @@ Slab::Slab(int ndim, int size[], int COMM_DIMS[], MPI_Datatype MPI_sendtype,
 
     this->_es = nullptr;
     this->_subsizes = nullptr;
-    this->_offsets  = nullptr;
+    this->_offsets = nullptr;
     this->_subsize = nullptr;
     this->_offset = nullptr;
     this->_comms = nullptr;
@@ -202,11 +210,11 @@ Slab::Slab(int ndim, int size[], int COMM_DIMS[], MPI_Datatype MPI_sendtype,
   std::copy(size, size + this->_ndim, this->_size);
 
   this->_nes = number_of_exchange_sequences(this->_nda, this->_nca);
-  this->_es  = new int[this->_nes];
+  this->_es = new int[this->_nes];
   exchange_sequences(this->_nda, this->_nca, this->_nes, this->_es);
 
   this->_subsizes = new int[(this->_nda + 1) * this->_ndim];
-  this->_offsets  = new int[(this->_nda + 1) * this->_ndim];
+  this->_offsets = new int[(this->_nda + 1) * this->_ndim];
 
   // sizes/ranks per subcomm
   std::vector<int> comm_sizes(this->_nda), comm_ranks(this->_nda);
@@ -219,8 +227,8 @@ Slab::Slab(int ndim, int size[], int COMM_DIMS[], MPI_Datatype MPI_sendtype,
 
   this->_subarrays = new MPI_Datatype[2 * this->_nda * this->_max_comm_size];
 
-  this->_cas   = new int[this->_nca * (this->_nda + 1)];
-  this->_das   = new int[this->_nda * (this->_nda + 1)];
+  this->_cas = new int[this->_nca * (this->_nda + 1)];
+  this->_das = new int[this->_nda * (this->_nda + 1)];
   this->_axesA = new int[this->_nda];
   this->_axesB = new int[this->_nda];
 
@@ -228,15 +236,12 @@ Slab::Slab(int ndim, int size[], int COMM_DIMS[], MPI_Datatype MPI_sendtype,
   std::iota(this->_cas, this->_cas + this->_nca, this->_nda);
 
   for (int i = 0; i < this->_nda; i++) {
-    std::copy(&(this->_das[i * this->_nda]),
-              &(this->_das[i * this->_nda]) + this->_nda,
+    std::copy(&(this->_das[i * this->_nda]), &(this->_das[i * this->_nda]) + this->_nda,
               &(this->_das[(i + 1) * this->_nda]));
-    std::copy(&(this->_cas[i * this->_nca]),
-              &(this->_cas[i * this->_nca]) + this->_nca,
+    std::copy(&(this->_cas[i * this->_nca]), &(this->_cas[i * this->_nca]) + this->_nca,
               &(this->_cas[(i + 1) * this->_nca]));
     exchange_axes(this->_ndim, this->_nda, &(this->_das[(i + 1) * this->_nda]),
-                  &(this->_cas[(i + 1) * this->_nca]), &(this->_axesA[i]),
-                  &(this->_axesB[i]), i);
+                  &(this->_cas[(i + 1) * this->_nca]), &(this->_axesA[i]), &(this->_axesB[i]), i);
   }
 
   int n = 0, s = 0;
@@ -244,24 +249,24 @@ Slab::Slab(int ndim, int size[], int COMM_DIMS[], MPI_Datatype MPI_sendtype,
     this->_daA = &(this->_das[i * this->_nda]);
     for (int j = 0; j < this->_ndim; j++) {
       this->_subsizes[i * this->_ndim + j] = this->_size[j];
-      this->_offsets [i * this->_ndim + j] = 0;
+      this->_offsets[i * this->_ndim + j] = 0;
     }
     for (int j = 0; j < this->_nda; j++) {
       decompose(this->_size[this->_daA[j]], comm_sizes[j], comm_ranks[j], &n, &s);
       this->_subsizes[i * this->_ndim + this->_daA[j]] = n;
-      this->_offsets [i * this->_ndim + this->_daA[j]] = s;
+      this->_offsets[i * this->_ndim + this->_daA[j]] = s;
     }
   }
 
   this->_daB = &(this->_das[this->_nda * this->_nda]);
   for (int i = 0; i < this->_ndim; i++) {
     this->_subsizes[this->_nda * this->_ndim + i] = this->_size[i];
-    this->_offsets [this->_nda * this->_ndim + i] = 0;
+    this->_offsets[this->_nda * this->_ndim + i] = 0;
   }
   for (int j = 0; j < this->_nda; j++) {
     decompose(this->_size[this->_daB[j]], comm_sizes[j], comm_ranks[j], &n, &s);
     this->_subsizes[this->_nda * this->_ndim + this->_daB[j]] = n;
-    this->_offsets [this->_nda * this->_ndim + this->_daB[j]] = s;
+    this->_offsets[this->_nda * this->_ndim + this->_daB[j]] = s;
   }
 
   for (int i = 0; i < this->_nda; i++) {
@@ -269,8 +274,7 @@ Slab::Slab(int ndim, int size[], int COMM_DIMS[], MPI_Datatype MPI_sendtype,
     this->_subsizeB = &(this->_subsizes[(i + 1) * this->_ndim]);
 
     subarray(MPI_sendtype, this->_ndim, this->_subsizeA, this->_axesA[i],
-             comm_sizes[this->_nda - i - 1],
-             &(this->_subarrays[2 * i * this->_max_comm_size]));
+             comm_sizes[this->_nda - i - 1], &(this->_subarrays[2 * i * this->_max_comm_size]));
 
     subarray(MPI_sendtype, this->_ndim, this->_subsizeB, this->_axesB[i],
              comm_sizes[this->_nda - i - 1],
@@ -278,7 +282,7 @@ Slab::Slab(int ndim, int size[], int COMM_DIMS[], MPI_Datatype MPI_sendtype,
   }
 
   this->_subsize = &(this->_subsizes[0]);
-  this->_offset  = &(this->_offsets[0]);
+  this->_offset = &(this->_offsets[0]);
 
   MPI_Barrier(comm);
 }
@@ -327,11 +331,13 @@ Slab::~Slab() {
       MPI_Comm_free(&this->_comms[i]);
     }
   }
-  if (this->_subarrays) delete[] this->_subarrays;
-  if (this->_comms)     delete[] this->_comms;
+  if (this->_subarrays)
+    delete[] this->_subarrays;
+  if (this->_comms)
+    delete[] this->_comms;
 }
 
-int Slab::get_ith_config(int *subsize, int *offset, int *ca, int ith) {
+int Slab::get_ith_config(int* subsize, int* offset, int* ca, int ith) {
   // Handle inactive ranks: no subsizes/offsets allocated
   if (this->_subsizes == nullptr || this->_offsets == nullptr) {
     // Fill with zeros for inactive rank
@@ -352,18 +358,18 @@ int Slab::get_ith_config(int *subsize, int *offset, int *ca, int ith) {
   }
 
   int indx = 0;
-  for (int i = 0; i < ith; i++) indx += this->_es[i];
+  for (int i = 0; i < ith; i++)
+    indx += this->_es[i];
 
   std::copy(&(this->_subsizes[indx * this->_ndim]),
             &(this->_subsizes[indx * this->_ndim]) + this->_ndim, subsize);
   std::copy(&(this->_offsets[indx * this->_ndim]),
             &(this->_offsets[indx * this->_ndim]) + this->_ndim, offset);
-  std::copy(&(this->_cas[indx * this->_nca]),
-            &(this->_cas[indx * this->_nca]) + this->_nca, ca);
+  std::copy(&(this->_cas[indx * this->_nca]), &(this->_cas[indx * this->_nca]) + this->_nca, ca);
   return 0;
 }
 
-int Slab::get_ith_layout(int *subsize, int *offset, int ith){
+int Slab::get_ith_layout(int* subsize, int* offset, int ith) {
   // Handle inactive ranks: no subsizes/offsets allocated
   if (this->_subsizes == nullptr || this->_offsets == nullptr) {
     for (int i = 0; i < this->_ndim; i++) {
@@ -379,7 +385,8 @@ int Slab::get_ith_layout(int *subsize, int *offset, int ith){
   }
 
   int indx = 0;
-  for (int i = 0; i < ith; i++) indx += this->_es[i];
+  for (int i = 0; i < ith; i++)
+    indx += this->_es[i];
 
   std::copy(&(this->_subsizes[indx * this->_ndim]),
             &(this->_subsizes[indx * this->_ndim]) + this->_ndim, subsize);
@@ -388,7 +395,7 @@ int Slab::get_ith_layout(int *subsize, int *offset, int ith){
   return 0;
 }
 
-int Slab::get_ith_axes(int *ca, int *da, int ith) {
+int Slab::get_ith_axes(int* ca, int* da, int ith) {
   // Valid configs: ith in [0, _nes], where ith==_nes corresponds to "after all exchanges"
   if (ith < 0 || ith > this->_nes) {
     return static_cast<int>(shafft::Status::SHAFFT_ERR_INVALID_DIM);
@@ -405,45 +412,45 @@ int Slab::get_ith_axes(int *ca, int *da, int ith) {
   }
 
   int indx = 0;
-  for (int i = 0; i < ith; i++) indx += this->_es[i];
+  for (int i = 0; i < ith; i++)
+    indx += this->_es[i];
 
-  std::copy(&(this->_cas[indx * this->_nca]),
-            &(this->_cas[indx * this->_nca]) + this->_nca, ca);
-  std::copy(&(this->_das[indx * this->_nda]),
-            &(this->_das[indx * this->_nda]) + this->_nda, da);
+  std::copy(&(this->_cas[indx * this->_nca]), &(this->_cas[indx * this->_nca]) + this->_nca, ca);
+  std::copy(&(this->_das[indx * this->_nda]), &(this->_das[indx * this->_nda]) + this->_nda, da);
   return 0;
-} 
+}
 
 size_t Slab::alloc_size() {
   // Inactive ranks have no work
-  if (this->_subsizes == nullptr) return 0;
+  if (this->_subsizes == nullptr)
+    return 0;
 
   size_t max_elements = 0;
   for (int i = 0; i < this->_nda + 1; i++) {
-    max_elements = std::max(
-        max_elements,
-        product<int, size_t>(&this->_subsizes[i * this->_ndim], this->_ndim));
+    max_elements = std::max(max_elements,
+                            product<int, size_t>(&this->_subsizes[i * this->_ndim], this->_ndim));
   }
   return max_elements;
 }
 
 bool Slab::is_active() const noexcept {
-  // Inactive ranks have nullptr subsizes (set in constructor when MPI_Cart_create returns MPI_COMM_NULL)
+  // Inactive ranks have nullptr subsizes (set in constructor when MPI_Cart_create returns
+  // MPI_COMM_NULL)
   return this->_subsizes != nullptr;
 }
 
-void Slab::set_buffers(void *Adata, void *Bdata) {
+void Slab::set_buffers(void* Adata, void* Bdata) {
   this->_Adata = Adata;
   this->_Bdata = Bdata;
 }
 
-void Slab::get_buffers(void **Adata, void **Bdata) {
+void Slab::get_buffers(void** Adata, void** Bdata) {
   *Adata = this->_Adata;
   *Bdata = this->_Bdata;
 }
 
 void Slab::swap_buffers() {
-  void *temp = this->_Adata;
+  void* temp = this->_Adata;
   this->_Adata = this->_Bdata;
   this->_Bdata = temp;
 }
@@ -478,35 +485,46 @@ int Slab::es_index() {
 int Slab::nes() {
   return this->_nes;
 }
-void Slab::get_es(int *es) {
+void Slab::get_es(int* es) {
   std::copy(this->_es, this->_es + this->_nes, es);
 }
-void Slab::get_size(int *size) {
+void Slab::get_size(int* size) {
   if (this->_size == nullptr) {
-    for (int i = 0; i < this->_ndim; i++) size[i] = 0;
+    for (int i = 0; i < this->_ndim; i++)
+      size[i] = 0;
     return;
   }
   std::copy(this->_size, this->_size + this->_ndim, size);
 }
-void Slab::get_subsize(int *subsize) {
+void Slab::get_subsize(int* subsize) {
   if (this->_subsize == nullptr) {
-    for (int i = 0; i < this->_ndim; i++) subsize[i] = 0;
+    for (int i = 0; i < this->_ndim; i++)
+      subsize[i] = 0;
     return;
   }
   std::copy(this->_subsize, this->_subsize + this->_ndim, subsize);
 }
-void Slab::get_offset(int *offset) {
+void Slab::get_offset(int* offset) {
   if (this->_offset == nullptr) {
-    for (int i = 0; i < this->_ndim; i++) offset[i] = 0;
+    for (int i = 0; i < this->_ndim; i++)
+      offset[i] = 0;
     return;
   }
   std::copy(this->_offset, this->_offset + this->_ndim, offset);
 }
-void *Slab::data() { return this->_Adata; }
-void *Slab::work() { return this->_Bdata; }
-int Slab::ndim() { return this->_ndim; }
-int Slab::nca()  { return this->_nca; }
-void Slab::get_ca(int *ca) {
+void* Slab::data() {
+  return this->_Adata;
+}
+void* Slab::work() {
+  return this->_Bdata;
+}
+int Slab::ndim() {
+  return this->_ndim;
+}
+int Slab::nca() {
+  return this->_nca;
+}
+void Slab::get_ca(int* ca) {
   // Handle single-rank case: _cas not initialized, all axes are contiguous
   if (this->_cas == nullptr || this->_nda == 0) {
     for (int i = 0; i < this->_nca; i++) {
@@ -519,8 +537,10 @@ void Slab::get_ca(int *ca) {
   std::copy(&(this->_cas[this->_exchange_index * this->_nca]),
             &(this->_cas[this->_exchange_index * this->_nca]) + this->_nca, ca);
 }
-int Slab::nda()  { return this->_nda; }
-void Slab::get_da(int *da) {
+int Slab::nda() {
+  return this->_nda;
+}
+void Slab::get_da(int* da) {
   // Handle single-rank case: _das not initialized, no distributed axes
   if (this->_das == nullptr || this->_nda == 0) {
     return;  // Nothing to copy
@@ -561,7 +581,8 @@ void Slab::prepare_backward_exchange() {
 
   this->_subsizeA = &(this->_subsizes[(this->_exchange_index) * this->_ndim]);
   this->_subsizeB = &(this->_subsizes[(this->_exchange_index - 1) * this->_ndim]);
-  this->_subarrayA = &(this->_subarrays[(2 * (this->_exchange_index - 1) + 1) * this->_max_comm_size]);
+  this->_subarrayA =
+      &(this->_subarrays[(2 * (this->_exchange_index - 1) + 1) * this->_max_comm_size]);
   this->_subarrayB = &(this->_subarrays[2 * (this->_exchange_index - 1) * this->_max_comm_size]);
 
   this->_taA = this->_axesB[this->_exchange_index - 1];
@@ -591,16 +612,16 @@ void Slab::_exchange() {
     if (this->_hostA == nullptr) {
       this->_hostA = std::malloc(buf_bytes);
       if (!this->_hostA) {
-        std::cerr << "Error: Failed to allocate host staging buffer A (" 
-                  << buf_bytes << " bytes)" << std::endl;
+        std::cerr << "Error: Failed to allocate host staging buffer A (" << buf_bytes << " bytes)"
+                  << std::endl;
         return;
       }
     }
     if (this->_hostB == nullptr) {
       this->_hostB = std::malloc(buf_bytes);
       if (!this->_hostB) {
-        std::cerr << "Error: Failed to allocate host staging buffer B (" 
-                  << buf_bytes << " bytes)" << std::endl;
+        std::cerr << "Error: Failed to allocate host staging buffer B (" << buf_bytes << " bytes)"
+                  << std::endl;
         return;
       }
     }
@@ -632,17 +653,17 @@ void Slab::_exchange() {
   this->_exchange_index += this->_exchange_direction;
 
   this->_subsize = &(this->_subsizes[this->_exchange_index * this->_ndim]);
-  this->_offset  = &(this->_offsets [this->_exchange_index * this->_ndim]);
+  this->_offset = &(this->_offsets[this->_exchange_index * this->_ndim]);
 }
 
-void Slab::get_indices(int index, int ndim, int *size, int *offset, int *indices) {
+void Slab::get_indices(int index, int ndim, int* size, int* offset, int* indices) {
   for (int i = ndim - 1; i >= 0; i--) {
     indices[i] = index % size[i] + offset[i];
     index /= size[i];
   }
 }
 
-int Slab::get_index(int *indices, int ndim, int *size) {
+int Slab::get_index(int* indices, int ndim, int* size) {
   std::vector<int> strides(ndim, 0);
   strides[ndim - 1] = 1;
   for (int i = ndim - 2; i >= 0; i--) {
@@ -655,4 +676,4 @@ int Slab::get_index(int *indices, int ndim, int *size) {
   return index;
 }
 
-} // namespace shafft
+}  // namespace shafft

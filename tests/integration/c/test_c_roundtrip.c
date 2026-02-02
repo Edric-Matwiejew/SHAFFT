@@ -15,6 +15,14 @@ typedef struct { float real; float imag; } complexf;
 /* Tolerance for floating point comparison */
 #define TOLERANCE 1e-4f
 
+#define FAIL_WITH_ERR(label, rc) \
+    do { \
+        char buf[256] = {0}; \
+        shafft_last_error_message(buf, sizeof(buf)); \
+        fprintf(stderr, "%s failed rc=%d err=\"%s\"\n", label, rc, buf); \
+        return 1; \
+    } while (0)
+
 static int test_roundtrip_basic(void) {
     int dims[3] = {32, 32, 32};
     const int ndim = 3;
@@ -24,43 +32,23 @@ static int test_roundtrip_basic(void) {
     /* Create plan */
     void* plan = NULL;
     rc = shafftPlanCreate(&plan);
-    if (rc != 0 || plan == NULL) {
-        fprintf(stderr, "shafftPlanCreate failed: %d\n", rc);
-        return 1;
-    }
+    if (rc != 0 || plan == NULL) FAIL_WITH_ERR("shafftPlanCreate", rc);
     
     /* Initialize plan */
     rc = shafftPlanNDA(plan, ndim, nda, dims, SHAFFT_C2C, MPI_COMM_WORLD);
-    if (rc != 0) {
-        fprintf(stderr, "shafftPlanNDA failed: %d\n", rc);
-        shafftDestroy(&plan);
-        return 1;
-    }
+    if (rc != 0) { shafftDestroy(&plan); FAIL_WITH_ERR("shafftPlanNDA", rc); }
     
     /* Get allocation size */
     size_t alloc_size = 0;
     rc = shafftGetAllocSize(plan, &alloc_size);
-    if (rc != 0 || alloc_size == 0) {
-        fprintf(stderr, "shafftGetAllocSize failed: %d, size=%zu\n", rc, alloc_size);
-        shafftDestroy(&plan);
-        return 1;
-    }
+    if (rc != 0 || alloc_size == 0) { shafftDestroy(&plan); FAIL_WITH_ERR("shafftGetAllocSize", rc); }
     
     /* Allocate device buffers */
     void *data = NULL, *work = NULL;
     rc = shafftAllocBufferF(alloc_size, &data);
-    if (rc != 0) {
-        fprintf(stderr, "shafftAllocBufferF(data) failed: %d\n", rc);
-        shafftDestroy(&plan);
-        return 1;
-    }
+    if (rc != 0) { shafftDestroy(&plan); FAIL_WITH_ERR("shafftAllocBufferF(data)", rc); }
     rc = shafftAllocBufferF(alloc_size, &work);
-    if (rc != 0) {
-        fprintf(stderr, "shafftAllocBufferF(work) failed: %d\n", rc);
-        shafftFreeBufferF(data);
-        shafftDestroy(&plan);
-        return 1;
-    }
+    if (rc != 0) { shafftFreeBufferF(data); shafftDestroy(&plan); FAIL_WITH_ERR("shafftAllocBufferF(work)", rc); }
     
     /* Create host data with a known pattern */
     complexf* host_orig = (complexf*)malloc(alloc_size * sizeof(complexf));
@@ -83,88 +71,32 @@ static int test_roundtrip_basic(void) {
     
     /* Copy to device */
     rc = shafftCopyToBufferF(data, host_orig, alloc_size);
-    if (rc != 0) {
-        fprintf(stderr, "shafftCopyToBufferF failed: %d\n", rc);
-        shafftFreeBufferF(data);
-        shafftFreeBufferF(work);
-        shafftDestroy(&plan);
-        free(host_orig);
-        free(host_result);
-        return 1;
-    }
+    if (rc != 0) { shafftFreeBufferF(data); shafftFreeBufferF(work); shafftDestroy(&plan); free(host_orig); free(host_result); FAIL_WITH_ERR("shafftCopyToBufferF", rc); }
     
     /* Set buffers */
     rc = shafftSetBuffers(plan, data, work);
-    if (rc != 0) {
-        fprintf(stderr, "shafftSetBuffers failed: %d\n", rc);
-        shafftFreeBufferF(data);
-        shafftFreeBufferF(work);
-        shafftDestroy(&plan);
-        free(host_orig);
-        free(host_result);
-        return 1;
-    }
+    if (rc != 0) { shafftFreeBufferF(data); shafftFreeBufferF(work); shafftDestroy(&plan); free(host_orig); free(host_result); FAIL_WITH_ERR("shafftSetBuffers", rc); }
     
     /* Execute forward transform */
     rc = shafftExecute(plan, SHAFFT_FORWARD);
-    if (rc != 0) {
-        fprintf(stderr, "shafftExecute(FORWARD) failed: %d\n", rc);
-        shafftFreeBufferF(data);
-        shafftFreeBufferF(work);
-        shafftDestroy(&plan);
-        free(host_orig);
-        free(host_result);
-        return 1;
-    }
+    if (rc != 0) { shafftFreeBufferF(data); shafftFreeBufferF(work); shafftDestroy(&plan); free(host_orig); free(host_result); FAIL_WITH_ERR("shafftExecute(FORWARD)", rc); }
     
     /* Execute backward transform */
     rc = shafftExecute(plan, SHAFFT_BACKWARD);
-    if (rc != 0) {
-        fprintf(stderr, "shafftExecute(BACKWARD) failed: %d\n", rc);
-        shafftFreeBufferF(data);
-        shafftFreeBufferF(work);
-        shafftDestroy(&plan);
-        free(host_orig);
-        free(host_result);
-        return 1;
-    }
+    if (rc != 0) { shafftFreeBufferF(data); shafftFreeBufferF(work); shafftDestroy(&plan); free(host_orig); free(host_result); FAIL_WITH_ERR("shafftExecute(BACKWARD)", rc); }
     
     /* Normalize */
     rc = shafftNormalize(plan);
-    if (rc != 0) {
-        fprintf(stderr, "shafftNormalize failed: %d\n", rc);
-        shafftFreeBufferF(data);
-        shafftFreeBufferF(work);
-        shafftDestroy(&plan);
-        free(host_orig);
-        free(host_result);
-        return 1;
-    }
+    if (rc != 0) { shafftFreeBufferF(data); shafftFreeBufferF(work); shafftDestroy(&plan); free(host_orig); free(host_result); FAIL_WITH_ERR("shafftNormalize", rc); }
     
     /* Get the result buffer (may have swapped) */
     void *result_data = NULL, *result_work = NULL;
     rc = shafftGetBuffers(plan, &result_data, &result_work);
-    if (rc != 0) {
-        fprintf(stderr, "shafftGetBuffers failed: %d\n", rc);
-        shafftFreeBufferF(data);
-        shafftFreeBufferF(work);
-        shafftDestroy(&plan);
-        free(host_orig);
-        free(host_result);
-        return 1;
-    }
+    if (rc != 0) { shafftFreeBufferF(data); shafftFreeBufferF(work); shafftDestroy(&plan); free(host_orig); free(host_result); FAIL_WITH_ERR("shafftGetBuffers", rc); }
     
     /* Copy result back to host */
     rc = shafftCopyFromBufferF(host_result, result_data, alloc_size);
-    if (rc != 0) {
-        fprintf(stderr, "shafftCopyFromBufferF failed: %d\n", rc);
-        shafftFreeBufferF(data);
-        shafftFreeBufferF(work);
-        shafftDestroy(&plan);
-        free(host_orig);
-        free(host_result);
-        return 1;
-    }
+    if (rc != 0) { shafftFreeBufferF(data); shafftFreeBufferF(work); shafftDestroy(&plan); free(host_orig); free(host_result); FAIL_WITH_ERR("shafftCopyFromBufferF", rc); }
     
     /* Compare with original */
     float max_err = 0.0f;

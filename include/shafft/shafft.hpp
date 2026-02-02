@@ -8,13 +8,14 @@
 
 #include <shafft/shafft_config.h>
 #include <shafft/shafft_types.hpp>
+
 #include <cstddef>
 #include <mpi.h>
 #include <vector>
 
 #if SHAFFT_BACKEND_HIPFFT
-#include <hip/hip_runtime.h>
 #include <hip/hip_complex.h>
+#include <hip/hip_runtime.h>
 #endif
 #if SHAFFT_BACKEND_FFTW
 #include <fftw3.h>
@@ -42,18 +43,18 @@ namespace shafft {
  *   if (plan.init(1, {64, 64, 32}, shafft::FFTType::C2C, MPI_COMM_WORLD) != 0) {
  *     // handle error
  *   }
- *   
+ *
  *   shafft::complexf *data, *work;
  *   shafft::allocBuffer(plan.allocSize(), &data);
  *   shafft::allocBuffer(plan.allocSize(), &work);
- *   
+ *
  *   plan.setBuffers(data, work);
  *   plan.execute(shafft::FFTDirection::FORWARD);
  *   plan.normalize();
  * @endcode
  */
 class Plan {
-public:
+ public:
   /// @brief Default constructor. Creates an uninitialized plan.
   Plan() noexcept = default;
 
@@ -92,8 +93,8 @@ public:
    * @param comm       MPI communicator.
    * @return Status code (0 on success).
    */
-  [[nodiscard]] int init(int nda, const std::vector<int>& dimensions,
-                         FFTType type, MPI_Comm comm) noexcept;
+  [[nodiscard]] int init(int nda, const std::vector<int>& dimensions, FFTType type,
+                         MPI_Comm comm) noexcept;
 
   /**
    * @brief Initialize plan with explicit Cartesian process grid.
@@ -104,8 +105,7 @@ public:
    * @param comm       MPI communicator.
    * @return Status code (0 on success).
    */
-  [[nodiscard]] int initCart(const std::vector<int>& commDims,
-                             const std::vector<int>& dimensions,
+  [[nodiscard]] int initCart(const std::vector<int>& commDims, const std::vector<int>& dimensions,
                              FFTType type, MPI_Comm comm) noexcept;
 
   //----------------------------------------------------------------------------
@@ -121,7 +121,7 @@ public:
 
   /**
    * @brief Retrieve current data and work buffer pointers.
-   * 
+   *
    * After execute(), buffers may be swapped internally.
    * @return Status code (0 on success).
    */
@@ -155,11 +155,11 @@ public:
 
   /**
    * @brief Apply normalization to the transformed data.
-   * 
+   *
    * Normalizes by `1/sqrt(N)` for each FFT that was executed, where N is the
    * total tensor size. After a forward-backward pair, calling `normalize()`
    * returns data to its original scale.
-   * 
+   *
    * @return Status code (0 on success).
    */
   [[nodiscard]] int normalize() noexcept;
@@ -216,7 +216,7 @@ public:
   [[nodiscard]] PlanData* data() noexcept { return data_; }
   [[nodiscard]] const PlanData* data() const noexcept { return data_; }
 
-private:
+ private:
   PlanData* data_ = nullptr;
 };
 
@@ -261,7 +261,7 @@ int setBuffers(PlanData* plan, fftw_complex* data, fftw_complex* work) noexcept;
 /// @brief Set buffers (fftwf_complex overload).
 /// @ingroup cpp_api
 int setBuffers(PlanData* plan, fftwf_complex* data, fftwf_complex* work) noexcept;
-#endif  
+#endif
 
 //------------------------------------------------------------------------------
 // Backend-agnostic buffer functions (portable across CPU and GPU)
@@ -420,9 +420,8 @@ int planCreate(PlanData** out);
  * @param COMM       MPI communicator.
  * @return Status code (SHAFFT_SUCCESS on success, error code on failure).
  */
-int configurationNDA(const std::vector<int>& size, int& nda,
-                     std::vector<int>& subsize, std::vector<int>& offset,
-                     std::vector<int>& COMM_DIMS, FFTType precision,
+int configurationNDA(const std::vector<int>& size, int& nda, std::vector<int>& subsize,
+                     std::vector<int>& offset, std::vector<int>& COMM_DIMS, FFTType precision,
                      size_t mem_limit, MPI_Comm COMM);
 
 /**
@@ -474,26 +473,24 @@ int configurationNDA(const std::vector<int>& size, int& nda,
  * @return Status code (SHAFFT_SUCCESS on success, error code on failure).
  */
 int configurationCart(const std::vector<int>& size, std::vector<int>& subsize,
-                      std::vector<int>& offset, std::vector<int>& COMM_DIMS,
-                      int& COMM_SIZE, FFTType precision, size_t mem_limit,
-                      MPI_Comm COMM);
+                      std::vector<int>& offset, std::vector<int>& COMM_DIMS, int& COMM_SIZE,
+                      FFTType precision, size_t mem_limit, MPI_Comm COMM);
 
 /**
  * @brief Build a plan from an NDA decomposition (C-style API).
  * @ingroup cpp_api
  * @note Prefer using Plan::init() for the RAII interface.
  */
-int planNDA(PlanData* plan, int nda, const std::vector<int>& dimensions,
-            FFTType precision, MPI_Comm COMM);
+int planNDA(PlanData* plan, int nda, const std::vector<int>& dimensions, FFTType precision,
+            MPI_Comm COMM);
 
 /**
  * @brief Build a plan from an explicit Cartesian process grid (C-style API).
  * @ingroup cpp_api
  * @note Prefer using Plan::initCart() for the RAII interface.
  */
-int planCart(PlanData* plan, const std::vector<int>& COMM_DIMS,
-             const std::vector<int>& dimensions, FFTType precision,
-             MPI_Comm COMM);
+int planCart(PlanData* plan, const std::vector<int>& COMM_DIMS, const std::vector<int>& dimensions,
+             FFTType precision, MPI_Comm COMM);
 
 /**
  * @brief Release resources held by the plan and null out the pointer.
@@ -510,8 +507,8 @@ int destroy(PlanData** plan);
  *
  * @return Status::SHAFFT_SUCCESS on success, error otherwise.
  */
-int getLayout(const PlanData* plan, std::vector<int>& subsize,
-              std::vector<int>& offset, TensorLayout layout);
+int getLayout(const PlanData* plan, std::vector<int>& subsize, std::vector<int>& offset,
+              TensorLayout layout);
 
 /**
  * @brief Query the current/initial/transformed tensor axes (contiguous/distributed).
@@ -519,8 +516,7 @@ int getLayout(const PlanData* plan, std::vector<int>& subsize,
  *
  * @return Status::SHAFFT_SUCCESS on success, error otherwise.
  */
-int getAxes(const PlanData* plan, std::vector<int>& ca,
-            std::vector<int>& da, TensorLayout layout);
+int getAxes(const PlanData* plan, std::vector<int>& ca, std::vector<int>& da, TensorLayout layout);
 
 /**
  * @brief Report the total buffer size required by the plan (in elements).
@@ -579,19 +575,16 @@ inline Version getVersion() noexcept {
 }
 
 /**
- * @brief Get the library version as a string (e.g., "0.0.1-alpha").
+ * @brief Get the library version as a string (e.g., "0.1.0-alpha").
  * @ingroup cpp_api
  */
 inline const char* getVersionString() noexcept {
   // Computed at compile time
-  static const char version[] = 
-    SHAFFT_STRINGIFY(SHAFFT_VERSION_MAJOR) "."
-    SHAFFT_STRINGIFY(SHAFFT_VERSION_MINOR) "."
-    SHAFFT_STRINGIFY(SHAFFT_VERSION_PATCH)
-    SHAFFT_VERSION_SUFFIX;
+  static const char version[] = SHAFFT_STRINGIFY(SHAFFT_VERSION_MAJOR) "." SHAFFT_STRINGIFY(
+      SHAFFT_VERSION_MINOR) "." SHAFFT_STRINGIFY(SHAFFT_VERSION_PATCH) SHAFFT_VERSION_SUFFIX;
   return version;
 }
 
-} // namespace shafft
+}  // namespace shafft
 
-#endif // SHAFFT_CPP_H
+#endif  // SHAFFT_CPP_H

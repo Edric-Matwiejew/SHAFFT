@@ -41,6 +41,19 @@ cmake -B build -S . \
 cmake --build build --target install
 ```
 
+```bash
+# hipFFT backend (GPU, host-staging MPI)
+cmake -B build -S . \
+    -DSHAFFT_ENABLE_HIPFFT=ON \
+    -DSHAFFT_GPU_AWARE_MPI=OFF \
+    -DCMAKE_PREFIX_PATH=/opt/rocm \
+    -DCMAKE_INSTALL_PREFIX=/opt/shafft
+
+cmake --build build --target install
+```
+
+Config header is generated at `build/include/shafft/shafft_config.h`; there should be no `include/shafft/shafft_config.h` in the source tree.
+
 ### Testing
 
 ```bash
@@ -93,6 +106,7 @@ Main documentation pages:
 - @ref user-guide - API usage with C++, C, and Fortran examples
 - @ref linking-guide - Compile and link instructions
 - @ref backends - Backend-specific configuration
+- @ref limitations - Known constraints and limitations
 
 Or view the source documentation files directly in `docs/`.
 

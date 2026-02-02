@@ -57,27 +57,31 @@ Each rank owns a "pencil" - a subset of rows in both distributed dimensions, wit
 
 ## Layout Changes During FFT
 
-A key aspect of distributed FFTs is that the data layout changes during the transform. SHAFFT performs FFTs axis-by-axis, redistributing data as needed so that each axis is fully available locally when it's being transformed.
+A key aspect of distributed FFTs is that the data layout changes during the transform. SHAFFT performs FFTs axis by axis, redistributing data as needed so that each axis is available locally when it is transformed.
 
 ### Forward Transform
 
-For a 3D tensor initially distributed along axis 0:
+The distributed axis (or axes) generally changes during the FFT because each
+axis must be local when its transform is executed. SHAFFT performs staged
+redistributions between axes, and the exact sequence depends on:
 
-1. Initial layout: Distributed along axis 0, contiguous along axes 1 and 2
-2. FFT along axes 1 and 2: These are local, no redistribution needed
-3. Global redistribution: Data is exchanged so axis 0 becomes local
-4. FFT along axis 0: Now possible since axis 0 is local
-5. Final layout: Distributed along axis 2 (the layout has changed)
+- Number of dimensions
+- Number of distributed axes (`nda`) / process grid
+- Backend and GPU-aware-MPI setting (which can add staging steps)
 
-The transform changes which axis is distributed:
+Therefore, do **not** assume a fixed mapping such as "axis 0 becomes axis 2".
+Always query the layout you need:
 
-| Stage | Distributed Axis | Contiguous Axes |
-|-------|------------------|-----------------|
-| Initial | 0 | 1, 2 |
-| After forward FFT | 2 | 1, 0 |
-| After backward FFT | 0 | 1, 2 |
+- `TensorLayout::INITIAL` / `SHAFFT_TENSOR_LAYOUT_INITIAL`: layout at plan creation
+- `TensorLayout::TRANSFORMED` / `..._TRANSFORMED`: layout after a full forward (or backward) transform
+- `TensorLayout::CURRENT` / `..._CURRENT`: actual runtime layout (tracks each execute)
 
-The backward transform reverses this process, returning the tensor to its original distribution.
+Use `getLayout()` for subsize/offset and `getAxes()` for contiguous and
+distributed axis lists at the stage you care about.
+
+Local contiguous axes are transformed directly (as multi‑D or internally
+fused batches, depending on the backend). Redistributions happen to make
+distributed axes local before they are transformed.
 
 ## Querying Layout Information
 

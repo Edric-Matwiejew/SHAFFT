@@ -1,6 +1,9 @@
 /**
  * @file test_layout.cpp
  * @brief Test that getLayout returns correct subsize/offset for various configurations
+ * 
+ * Note: Basic subsize sum and offset contiguity tests are in test_configuration_modes.cpp.
+ * This file focuses on Plan::getLayout() behavior with INITIAL/TRANSFORMED/CURRENT layouts.
  */
 #include "test_utils.hpp"
 #include <shafft/shafft.hpp>
@@ -9,68 +12,6 @@
 #include <numeric>
 
 using namespace test;
-
-// Verify that all ranks' subsizes sum to global dims
-static bool test_subsize_sum() {
-    std::vector<int> dims = {64, 64, 32};
-    const int nda = 1;
-    
-    shafft::Plan plan;
-    int rc = plan.init(nda, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
-    if (rc != 0) return false;
-    
-    std::vector<int> subsize(3), offset(3);
-    plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
-    
-    // Gather all subsizes for axis 0 (distributed axis)
-    int local_size0 = subsize[0];
-    int total_size0 = 0;
-    MPI_Allreduce(&local_size0, &total_size0, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-    
-    // Should equal global dimension
-    if (total_size0 != dims[0]) return false;
-    
-    // Non-distributed axes should equal global dims
-    if (subsize[1] != dims[1]) return false;
-    if (subsize[2] != dims[2]) return false;
-    
-    return true;
-}
-
-// Verify offsets are contiguous (no gaps, no overlaps)
-static bool test_offsets_contiguous() {
-    std::vector<int> dims = {100, 50};  // Non-power-of-2 to test balanced decomposition
-    const int nda = 1;
-    
-    int world_size;
-    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-    
-    shafft::Plan plan;
-    int rc = plan.init(nda, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
-    if (rc != 0) return false;
-    
-    std::vector<int> subsize(2), offset(2);
-    plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
-    
-    // Gather all (offset, subsize) pairs
-    std::vector<int> all_offsets(world_size), all_sizes(world_size);
-    MPI_Allgather(&offset[0], 1, MPI_INT, all_offsets.data(), 1, MPI_INT, MPI_COMM_WORLD);
-    MPI_Allgather(&subsize[0], 1, MPI_INT, all_sizes.data(), 1, MPI_INT, MPI_COMM_WORLD);
-    
-    // Verify contiguity: offset[i] + size[i] == offset[i+1]
-    for (int i = 0; i < world_size - 1; ++i) {
-        if (all_offsets[i] + all_sizes[i] != all_offsets[i + 1]) {
-            return false;
-        }
-    }
-    
-    // Last rank should reach the end
-    if (all_offsets[world_size - 1] + all_sizes[world_size - 1] != dims[0]) {
-        return false;
-    }
-    
-    return true;
-}
 
 // Test TRANSFORMED layout is different from INITIAL for NDA >= 1
 static bool test_transformed_layout() {
@@ -88,8 +29,8 @@ static bool test_transformed_layout() {
     std::vector<int> init_subsize(3), init_offset(3);
     std::vector<int> trans_subsize(3), trans_offset(3);
     
-    plan.getLayout(init_subsize, init_offset, shafft::TensorLayout::INITIAL);
-    plan.getLayout(trans_subsize, trans_offset, shafft::TensorLayout::TRANSFORMED);
+    (void)plan.getLayout(init_subsize, init_offset, shafft::TensorLayout::INITIAL);
+    (void)plan.getLayout(trans_subsize, trans_offset, shafft::TensorLayout::TRANSFORMED);
     
     // For nda=1, distribution should shift from axis 0 to last axis
     // Initial: axis 0 is distributed (subsize[0] < dims[0])
@@ -118,8 +59,8 @@ static bool test_current_tracks_state() {
     std::vector<int> init_sub(3), init_off(3);
     std::vector<int> curr_sub(3), curr_off(3);
     
-    plan.getLayout(init_sub, init_off, shafft::TensorLayout::INITIAL);
-    plan.getLayout(curr_sub, curr_off, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(init_sub, init_off, shafft::TensorLayout::INITIAL);
+    (void)plan.getLayout(curr_sub, curr_off, shafft::TensorLayout::CURRENT);
     
     for (int i = 0; i < 3; ++i) {
         if (init_sub[i] != curr_sub[i] || init_off[i] != curr_off[i]) {
@@ -130,19 +71,19 @@ static bool test_current_tracks_state() {
     // Allocate and execute forward
     size_t n = plan.allocSize();
     shafft::complexf *data, *work;
-    shafft::allocBuffer(n, &data);
-    shafft::allocBuffer(n, &work);
+    (void)shafft::allocBuffer(n, &data);
+    (void)shafft::allocBuffer(n, &work);
     
     std::vector<shafft::complexf> host(n, {0.0f, 0.0f});
-    shafft::copyToBuffer(data, host.data(), n);
-    plan.setBuffers(data, work);
+    (void)shafft::copyToBuffer(data, host.data(), n);
+    (void)plan.setBuffers(data, work);
     
-    plan.execute(shafft::FFTDirection::FORWARD);
+    (void)plan.execute(shafft::FFTDirection::FORWARD);
     
     // After forward: CURRENT == TRANSFORMED
     std::vector<int> trans_sub(3), trans_off(3);
-    plan.getLayout(trans_sub, trans_off, shafft::TensorLayout::TRANSFORMED);
-    plan.getLayout(curr_sub, curr_off, shafft::TensorLayout::CURRENT);
+    (void)plan.getLayout(trans_sub, trans_off, shafft::TensorLayout::TRANSFORMED);
+    (void)plan.getLayout(curr_sub, curr_off, shafft::TensorLayout::CURRENT);
     
     bool match_trans = true;
     for (int i = 0; i < 3; ++i) {
@@ -151,8 +92,8 @@ static bool test_current_tracks_state() {
         }
     }
     
-    shafft::freeBuffer(data);
-    shafft::freeBuffer(work);
+    (void)shafft::freeBuffer(data);
+    (void)shafft::freeBuffer(work);
     
     return match_trans;
 }
@@ -175,7 +116,7 @@ static bool test_initial_distributed_axes() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(ndim), offset(ndim);
-    plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
     
     if (world_size > 1) {
         // First nda axes should be distributed (subsize < global)
@@ -211,7 +152,7 @@ static bool test_initial_nda2() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(ndim), offset(ndim);
-    plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
     
     // First 2 axes should be distributed
     bool axis0_dist = (subsize[0] < dims[0]);
@@ -237,7 +178,7 @@ static bool test_initial_rank0_offset() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(ndim), offset(ndim);
-    plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
     
     if (rank == 0) {
         // Rank 0 should have offset 0 for all axes
@@ -269,7 +210,7 @@ static bool test_initial_single_rank() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(ndim), offset(ndim);
-    plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
     
     // Single rank: subsize == dims, offset == 0
     for (int i = 0; i < ndim; ++i) {
@@ -295,7 +236,7 @@ static bool test_initial_global_consistency() {
     if (rc != 0) return false;
     
     std::vector<int> subsize(ndim), offset(ndim);
-    plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
+    (void)plan.getLayout(subsize, offset, shafft::TensorLayout::INITIAL);
     
     // Gather all offsets and subsizes for distributed axis
     std::vector<int> all_offsets(world_size), all_sizes(world_size);
@@ -320,8 +261,6 @@ int main(int argc, char** argv) {
     
     TestRunner runner("Layout Tests");
     
-    runner.run("Subsizes sum to global dims", test_subsize_sum);
-    runner.run("Offsets are contiguous", test_offsets_contiguous);
     runner.run("TRANSFORMED differs from INITIAL", test_transformed_layout);
     runner.run("CURRENT tracks execute() state", test_current_tracks_state);
     

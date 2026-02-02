@@ -2,8 +2,8 @@
 @ingroup fortran_api
 @brief Integer parameter constants for the Fortran API.
 
-These constants are defined in the @c shafft module and should be used
-with the corresponding Fortran subroutines.
+These constants are defined in the @c shafft module as @c integer(c_int)
+parameters and should be used with the corresponding Fortran subroutines.
 
 @section fft_type_constants FFT Type Constants
 
@@ -29,6 +29,40 @@ at different stages of the transform.
 | @c SHAFFT_TENSOR_LAYOUT_CURRENT     | 0     | Current layout (initial or transformed)        |
 | @c SHAFFT_TENSOR_LAYOUT_INITIAL     | 1     | Layout before any transforms                   |
 | @c SHAFFT_TENSOR_LAYOUT_TRANSFORMED | 2     | Layout after forward/backward transform        |
+
+@section errsrc_constants Error Source Constants
+
+Returned by @c shafftLastErrorSource() to indicate which subsystem raised
+the last error.
+
+| Constant              | Value | Description                |
+|-----------------------|-------|----------------------------|
+| @c SHAFFT_ERRSRC_NONE   | 0     | No error / SHAFFT internal |
+| @c SHAFFT_ERRSRC_MPI    | 1     | MPI library error         |
+| @c SHAFFT_ERRSRC_HIP    | 2     | HIP runtime error         |
+| @c SHAFFT_ERRSRC_HIPFFT | 3     | hipFFT library error      |
+| @c SHAFFT_ERRSRC_FFTW   | 4     | FFTW library error        |
+| @c SHAFFT_ERRSRC_SYSTEM | 5     | OS / allocation error     |
+
+@section status_constants Status Code Constants
+
+Returned by all Fortran wrappers through the required @c ierr argument.
+
+| Constant                     | Value | Description                         |
+|------------------------------|-------|-------------------------------------|
+| @c SHAFFT_SUCCESS              | 0     | Success                             |
+| @c SHAFFT_ERR_NULLPTR          | 1     | Null pointer argument               |
+| @c SHAFFT_ERR_INVALID_COMM     | 2     | Invalid MPI communicator            |
+| @c SHAFFT_ERR_NO_BUFFER        | 3     | Required data/work buffer missing   |
+| @c SHAFFT_ERR_PLAN_NOT_INIT    | 4     | Plan or subplan not initialized     |
+| @c SHAFFT_ERR_INVALID_DIM      | 5     | Invalid dimension/rank/size         |
+| @c SHAFFT_ERR_DIM_MISMATCH     | 6     | Dimension mismatch between arrays   |
+| @c SHAFFT_ERR_INVALID_DECOMP   | 7     | Invalid/unsupported decomposition   |
+| @c SHAFFT_ERR_INVALID_FFTTYPE  | 8     | Unsupported FFT type                |
+| @c SHAFFT_ERR_ALLOC            | 9     | Memory allocation failure           |
+| @c SHAFFT_ERR_BACKEND          | 10    | FFT backend failure (FFTW/hipFFT)   |
+| @c SHAFFT_ERR_MPI              | 11    | MPI failure                         |
+| @c SHAFFT_ERR_INTERNAL         | 12    | Uncategorized internal error        |
 
 @par Example Usage:
 @code{.f90}
