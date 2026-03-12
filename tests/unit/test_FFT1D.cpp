@@ -9,6 +9,7 @@
  *   - Query methods (globalShape, localSize, allocSize, etc.)
  */
 #include "test_utils.hpp"
+#include <algorithm>
 #include <mpi.h>
 #include <shafft/shafft.hpp>
 #include <shafft/shafft_config.h>
@@ -143,22 +144,41 @@ static bool test_configuration1d_layout_correctness() {
       return false;
     }
 
-    // Verify: blocks are contiguous and non-overlapping
-    // localStart[i] should equal sum of localN[0..i-1]
-    for (int i = 0; i < worldSize; ++i) {
-      size_t expected_start = 0;
-      for (int j = 0; j < i; ++j)
-        expected_start += all_local_n[j];
+    // Verify: active blocks (localN > 0) are contiguous and non-overlapping.
+    // FFTW-MPI inactive ranks report localStart=0 regardless of position,
+    // so we only check contiguity among active ranks.
+    {
+      // Collect (localStart, localN) for active ranks, sorted by localStart
+      std::vector<std::pair<size_t, size_t>> active_blocks;
+      for (int i = 0; i < worldSize; ++i) {
+        if (all_local_n[i] > 0)
+          active_blocks.push_back({all_local_start[i], all_local_n[i]});
+      }
+      std::sort(active_blocks.begin(), active_blocks.end());
 
-      if (all_local_start[i] != expected_start) {
+      // First active block must start at 0
+      if (!active_blocks.empty() && active_blocks[0].first != 0) {
         if (worldRank == 0) {
-          std::printf("FAIL: N=%zu, rank %d localStart=%zu (expected %zu from contiguity)\n",
+          std::printf("FAIL: N=%zu, first active block starts at %zu (expected 0)\n",
                       N,
-                      i,
-                      all_local_start[i],
-                      expected_start);
+                      active_blocks[0].first);
         }
         return false;
+      }
+
+      // Successive active blocks must be contiguous
+      for (size_t b = 1; b < active_blocks.size(); ++b) {
+        size_t expected_start = active_blocks[b - 1].first + active_blocks[b - 1].second;
+        if (active_blocks[b].first != expected_start) {
+          if (worldRank == 0) {
+            std::printf("FAIL: N=%zu, active block %zu starts at %zu (expected %zu)\n",
+                        N,
+                        b,
+                        active_blocks[b].first,
+                        expected_start);
+          }
+          return false;
+        }
       }
     }
 

@@ -601,19 +601,29 @@ static bool test_various_sizes() {
       continue;
     }
 
+    // Inactive ranks skip buffer operations but must still participate
+    // in the collective all_ranks_pass() call below.
+    if (!fft.isActive()) {
+      if (!test::all_ranks_pass(true))
+        all_correct = false;
+      continue;
+    }
+
     size_t alloc = fft.allocSize();
     size_t actual_local_n = fft.localSize();
 
     shafft::complexf *data = nullptr, *work = nullptr;
     rc = shafft::allocBuffer(alloc, &data);
     if (rc != 0) {
-      all_correct = false;
+      if (!test::all_ranks_pass(false))
+        all_correct = false;
       continue;
     }
     rc = shafft::allocBuffer(alloc, &work);
     if (rc != 0) {
       (void)shafft::freeBuffer(data);
-      all_correct = false;
+      if (!test::all_ranks_pass(false))
+        all_correct = false;
       continue;
     }
 
@@ -629,7 +639,8 @@ static bool test_various_sizes() {
     if (rc != 0) {
       (void)shafft::freeBuffer(data);
       (void)shafft::freeBuffer(work);
-      all_correct = false;
+      if (!test::all_ranks_pass(false))
+        all_correct = false;
       continue;
     }
 
@@ -637,7 +648,8 @@ static bool test_various_sizes() {
     if (rc != 0) {
       (void)shafft::freeBuffer(data);
       (void)shafft::freeBuffer(work);
-      all_correct = false;
+      if (!test::all_ranks_pass(false))
+        all_correct = false;
       continue;
     }
 
@@ -646,7 +658,8 @@ static bool test_various_sizes() {
     if (rc != 0) {
       (void)shafft::freeBuffer(data);
       (void)shafft::freeBuffer(work);
-      all_correct = false;
+      if (!test::all_ranks_pass(false))
+        all_correct = false;
       continue;
     }
 
@@ -656,7 +669,8 @@ static bool test_various_sizes() {
     if (rc != 0) {
       (void)shafft::freeBuffer(data);
       (void)shafft::freeBuffer(work);
-      all_correct = false;
+      if (!test::all_ranks_pass(false))
+        all_correct = false;
       continue;
     }
 
@@ -712,6 +726,22 @@ static bool test_non_divisible_sizes() {
     rc = fft.plan();
     if (rc != 0) {
       all_correct = false;
+      continue;
+    }
+
+    // Inactive ranks skip buffer operations but must still participate
+    // in the collective check_rel_error() and all_ranks_pass() calls.
+    if (!fft.isActive()) {
+      bool size_correct = test::check_rel_error(
+          static_cast<shafft::complexf*>(nullptr),
+          static_cast<shafft::complexf*>(nullptr),
+          size_t{0}, N, MPI_COMM_WORLD, /*base_tol_rel=*/5e-4);
+      if (!test::all_ranks_pass(size_correct)) {
+        if (worldRank == 0) {
+          std::printf("FAIL: N=%zu round-trip failed\n", N);
+        }
+        all_correct = false;
+      }
       continue;
     }
 

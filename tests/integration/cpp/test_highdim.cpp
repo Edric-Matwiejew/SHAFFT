@@ -97,305 +97,100 @@ bool get_valid_comm_dims(const std::vector<size_t>& dims,
 }
 
 // ============================================================================
+// ============================================================================
+// Reusable roundtrip helper with inactive-rank support
+// ============================================================================
+
+/**
+ * Run a forward→backward→normalize roundtrip on an FFTND plan.
+ * Inactive ranks skip buffer operations but still participate in the
+ * collective MPI_Allreduce inside check_rel_error.
+ */
+template <typename ComplexT>
+static bool run_fftnd_roundtrip(const std::vector<size_t>& dims,
+                                shafft::FFTType type,
+                                double tol) {
+  std::vector<int> commDims;
+  if (!get_valid_comm_dims(dims, type, commDims))
+    return false;
+
+  shafft::FFTND fft;
+  int rc = fft.init(commDims, dims, type, MPI_COMM_WORLD);
+  rc = fft.plan();
+  if (rc != 0)
+    return false;
+
+  size_t globalN = test::product(dims);
+
+  if (!fft.isActive()) {
+    // Inactive rank: participate in collective error check with 0 elements
+    return test::check_rel_error(
+        static_cast<ComplexT*>(nullptr), static_cast<ComplexT*>(nullptr),
+        size_t{0}, globalN, MPI_COMM_WORLD, tol);
+  }
+
+  std::vector<size_t> subsize(dims.size()), offset(dims.size());
+  SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
+
+  size_t localElems = test::product(subsize);
+  size_t alloc_elems = fft.allocSize();
+
+  ComplexT *data = nullptr, *work = nullptr;
+  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &data));
+  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &work));
+
+  std::vector<ComplexT> original(alloc_elems);
+  init_index_tensor(original.data(), localElems, dims, subsize, offset);
+
+  SHAFFT_CHECK(shafft::copyToBuffer(data, original.data(), alloc_elems));
+  SHAFFT_CHECK(fft.setBuffers(data, work));
+
+  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
+  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::BACKWARD));
+  SHAFFT_CHECK(fft.normalize());
+
+  ComplexT *final_data, *final_work;
+  SHAFFT_CHECK(fft.getBuffers(&final_data, &final_work));
+
+  std::vector<ComplexT> result(alloc_elems);
+  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
+
+  bool passed = test::check_rel_error(
+      result.data(), original.data(), localElems, globalN, MPI_COMM_WORLD, tol);
+
+  (void)shafft::freeBuffer(data);
+  (void)shafft::freeBuffer(work);
+
+  return passed;
+}
+
+// ============================================================================
 // Single Precision Roundtrip Tests
 // ============================================================================
 
 static bool test_5d_c2c() {
-  std::vector<size_t> dims = {4, 4, 4, 4, 4}; // 1024 elements
-
-  std::vector<int> commDims;
-  if (!get_valid_comm_dims(dims, shafft::FFTType::C2C, commDims))
-    return false;
-
-  shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
-
-  std::vector<size_t> subsize(dims.size()), offset(dims.size());
-  SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
-
-  size_t localElems = test::product(subsize);
-  size_t alloc_elems = fft.allocSize();
-
-  shafft::complexf *data = nullptr, *work = nullptr;
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &data));
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &work));
-
-  std::vector<shafft::complexf> original(alloc_elems);
-  init_index_tensor(original.data(), localElems, dims, subsize, offset);
-
-  SHAFFT_CHECK(shafft::copyToBuffer(data, original.data(), alloc_elems));
-  SHAFFT_CHECK(fft.setBuffers(data, work));
-
-  // Forward + backward + normalize
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::BACKWARD));
-  SHAFFT_CHECK(fft.normalize());
-
-  // Get result
-  shafft::complexf *final_data, *final_work;
-  SHAFFT_CHECK(fft.getBuffers(&final_data, &final_work));
-
-  std::vector<shafft::complexf> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
-
-  size_t globalN = test::product(dims);
-  bool passed = test::check_rel_error(
-      result.data(), original.data(), localElems, globalN, MPI_COMM_WORLD, test::TOL_F);
-
-  (void)shafft::freeBuffer(data);
-  (void)shafft::freeBuffer(work);
-
-  return passed;
+  return run_fftnd_roundtrip<shafft::complexf>({4, 4, 4, 4, 4}, shafft::FFTType::C2C, test::TOL_F);
 }
 
 static bool test_5d_nda2() {
-  std::vector<size_t> dims = {4, 4, 4, 4, 4};
-
-  // For nda=2 style: try to decompose on axes 0 and 1
-  // configurationND gives us valid dims automatically
-  std::vector<int> commDims;
-  if (!get_valid_comm_dims(dims, shafft::FFTType::C2C, commDims))
-    return false;
-
-  shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
-
-  std::vector<size_t> subsize(dims.size()), offset(dims.size());
-  SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
-
-  size_t localElems = test::product(subsize);
-  size_t alloc_elems = fft.allocSize();
-
-  shafft::complexf *data = nullptr, *work = nullptr;
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &data));
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &work));
-
-  std::vector<shafft::complexf> original(alloc_elems);
-  init_index_tensor(original.data(), localElems, dims, subsize, offset);
-
-  SHAFFT_CHECK(shafft::copyToBuffer(data, original.data(), alloc_elems));
-  SHAFFT_CHECK(fft.setBuffers(data, work));
-
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::BACKWARD));
-  SHAFFT_CHECK(fft.normalize());
-
-  shafft::complexf *final_data, *final_work;
-  SHAFFT_CHECK(fft.getBuffers(&final_data, &final_work));
-
-  std::vector<shafft::complexf> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
-
-  size_t globalN = test::product(dims);
-  bool passed = test::check_rel_error(
-      result.data(), original.data(), localElems, globalN, MPI_COMM_WORLD, test::TOL_F);
-
-  (void)shafft::freeBuffer(data);
-  (void)shafft::freeBuffer(work);
-
-  return passed;
+  return run_fftnd_roundtrip<shafft::complexf>({4, 4, 4, 4, 4}, shafft::FFTType::C2C, test::TOL_F);
 }
 
 static bool test_7d_c2c() {
-  std::vector<size_t> dims = {4, 4, 4, 2, 2, 2, 2}; // 1024 elements, more divisible
-
-  std::vector<int> commDims;
-  if (!get_valid_comm_dims(dims, shafft::FFTType::C2C, commDims))
-    return false;
-
-  shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
-
-  std::vector<size_t> subsize(dims.size()), offset(dims.size());
-  SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
-
-  size_t localElems = test::product(subsize);
-  size_t alloc_elems = fft.allocSize();
-
-  shafft::complexf *data = nullptr, *work = nullptr;
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &data));
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &work));
-
-  std::vector<shafft::complexf> original(alloc_elems);
-  init_index_tensor(original.data(), localElems, dims, subsize, offset);
-
-  SHAFFT_CHECK(shafft::copyToBuffer(data, original.data(), alloc_elems));
-  SHAFFT_CHECK(fft.setBuffers(data, work));
-
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::BACKWARD));
-  SHAFFT_CHECK(fft.normalize());
-
-  shafft::complexf *final_data, *final_work;
-  SHAFFT_CHECK(fft.getBuffers(&final_data, &final_work));
-
-  std::vector<shafft::complexf> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
-
-  size_t globalN = test::product(dims);
-  bool passed = test::check_rel_error(
-      result.data(), original.data(), localElems, globalN, MPI_COMM_WORLD, test::TOL_F);
-
-  (void)shafft::freeBuffer(data);
-  (void)shafft::freeBuffer(work);
-
-  return passed;
+  return run_fftnd_roundtrip<shafft::complexf>({4, 4, 4, 2, 2, 2, 2}, shafft::FFTType::C2C, test::TOL_F);
 }
 
 static bool test_7d_nda3() {
-  std::vector<size_t> dims = {4, 4, 2, 2, 2, 2, 2}; // 512 elements
-
-  std::vector<int> commDims;
-  if (!get_valid_comm_dims(dims, shafft::FFTType::C2C, commDims))
-    return false;
-
-  shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
-
-  std::vector<size_t> subsize(dims.size()), offset(dims.size());
-  SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
-
-  size_t localElems = test::product(subsize);
-  size_t alloc_elems = fft.allocSize();
-
-  shafft::complexf *data = nullptr, *work = nullptr;
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &data));
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &work));
-
-  std::vector<shafft::complexf> original(alloc_elems);
-  init_index_tensor(original.data(), localElems, dims, subsize, offset);
-
-  SHAFFT_CHECK(shafft::copyToBuffer(data, original.data(), alloc_elems));
-  SHAFFT_CHECK(fft.setBuffers(data, work));
-
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::BACKWARD));
-  SHAFFT_CHECK(fft.normalize());
-
-  shafft::complexf *final_data, *final_work;
-  SHAFFT_CHECK(fft.getBuffers(&final_data, &final_work));
-
-  std::vector<shafft::complexf> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
-
-  size_t globalN = test::product(dims);
-  bool passed = test::check_rel_error(
-      result.data(), original.data(), localElems, globalN, MPI_COMM_WORLD, test::TOL_F);
-
-  (void)shafft::freeBuffer(data);
-  (void)shafft::freeBuffer(work);
-
-  return passed;
+  return run_fftnd_roundtrip<shafft::complexf>({4, 4, 2, 2, 2, 2, 2}, shafft::FFTType::C2C, test::TOL_F);
 }
 
 static bool test_9d_c2c() {
-  std::vector<size_t> dims = {2, 2, 2, 2, 2, 2, 2, 2, 2}; // 512 elements
-
-  std::vector<int> commDims;
-  if (!get_valid_comm_dims(dims, shafft::FFTType::C2C, commDims))
-    return false;
-
-  shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
-
-  std::vector<size_t> subsize(dims.size()), offset(dims.size());
-  SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
-
-  size_t localElems = test::product(subsize);
-  size_t alloc_elems = fft.allocSize();
-
-  shafft::complexf *data = nullptr, *work = nullptr;
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &data));
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &work));
-
-  std::vector<shafft::complexf> original(alloc_elems);
-  init_index_tensor(original.data(), localElems, dims, subsize, offset);
-
-  SHAFFT_CHECK(shafft::copyToBuffer(data, original.data(), alloc_elems));
-  SHAFFT_CHECK(fft.setBuffers(data, work));
-
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::BACKWARD));
-  SHAFFT_CHECK(fft.normalize());
-
-  shafft::complexf *final_data, *final_work;
-  SHAFFT_CHECK(fft.getBuffers(&final_data, &final_work));
-
-  std::vector<shafft::complexf> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
-
-  size_t globalN = test::product(dims);
-  bool passed = test::check_rel_error(
-      result.data(), original.data(), localElems, globalN, MPI_COMM_WORLD, test::TOL_F);
-
-  (void)shafft::freeBuffer(data);
-  (void)shafft::freeBuffer(work);
-
-  return passed;
+  return run_fftnd_roundtrip<shafft::complexf>({2, 2, 2, 2, 2, 2, 2, 2, 2}, shafft::FFTType::C2C, test::TOL_F);
 }
 
 static bool test_11d_c2c() {
-  std::vector<size_t> dims(11, 2); // 2048 elements
-
-  std::vector<int> commDims;
-  if (!get_valid_comm_dims(dims, shafft::FFTType::C2C, commDims))
-    return false;
-
-  shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
-
-  std::vector<size_t> subsize(dims.size()), offset(dims.size());
-  SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
-
-  size_t localElems = test::product(subsize);
-  size_t alloc_elems = fft.allocSize();
-
-  shafft::complexf *data = nullptr, *work = nullptr;
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &data));
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &work));
-
-  std::vector<shafft::complexf> original(alloc_elems);
-  init_index_tensor(original.data(), localElems, dims, subsize, offset);
-
-  SHAFFT_CHECK(shafft::copyToBuffer(data, original.data(), alloc_elems));
-  SHAFFT_CHECK(fft.setBuffers(data, work));
-
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::BACKWARD));
-  SHAFFT_CHECK(fft.normalize());
-
-  shafft::complexf *final_data, *final_work;
-  SHAFFT_CHECK(fft.getBuffers(&final_data, &final_work));
-
-  std::vector<shafft::complexf> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
-
-  size_t globalN = test::product(dims);
-  bool passed = test::check_rel_error(
-      result.data(), original.data(), localElems, globalN, MPI_COMM_WORLD, test::TOL_F);
-
-  (void)shafft::freeBuffer(data);
-  (void)shafft::freeBuffer(work);
-
-  return passed;
+  std::vector<size_t> dims(11, 2);
+  return run_fftnd_roundtrip<shafft::complexf>(dims, shafft::FFTType::C2C, test::TOL_F);
 }
 
 // ============================================================================
@@ -403,101 +198,11 @@ static bool test_11d_c2c() {
 // ============================================================================
 
 static bool test_5d_z2z() {
-  std::vector<size_t> dims = {4, 4, 4, 4, 4};
-
-  std::vector<int> commDims;
-  if (!get_valid_comm_dims(dims, shafft::FFTType::Z2Z, commDims))
-    return false;
-
-  shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
-
-  std::vector<size_t> subsize(dims.size()), offset(dims.size());
-  SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
-
-  size_t localElems = test::product(subsize);
-  size_t alloc_elems = fft.allocSize();
-
-  shafft::complexd *data = nullptr, *work = nullptr;
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &data));
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &work));
-
-  std::vector<shafft::complexd> original(alloc_elems);
-  init_index_tensor(original.data(), localElems, dims, subsize, offset);
-
-  SHAFFT_CHECK(shafft::copyToBuffer(data, original.data(), alloc_elems));
-  SHAFFT_CHECK(fft.setBuffers(data, work));
-
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::BACKWARD));
-  SHAFFT_CHECK(fft.normalize());
-
-  shafft::complexd *final_data, *final_work;
-  SHAFFT_CHECK(fft.getBuffers(&final_data, &final_work));
-
-  std::vector<shafft::complexd> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
-
-  size_t globalN = test::product(dims);
-  bool passed = test::check_rel_error(
-      result.data(), original.data(), localElems, globalN, MPI_COMM_WORLD, test::TOL_D);
-
-  (void)shafft::freeBuffer(data);
-  (void)shafft::freeBuffer(work);
-
-  return passed;
+  return run_fftnd_roundtrip<shafft::complexd>({4, 4, 4, 4, 4}, shafft::FFTType::Z2Z, test::TOL_D);
 }
 
 static bool test_7d_z2z() {
-  std::vector<size_t> dims = {4, 4, 4, 2, 2, 2, 2}; // 1024 elements
-
-  std::vector<int> commDims;
-  if (!get_valid_comm_dims(dims, shafft::FFTType::Z2Z, commDims))
-    return false;
-
-  shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
-
-  std::vector<size_t> subsize(dims.size()), offset(dims.size());
-  SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
-
-  size_t localElems = test::product(subsize);
-  size_t alloc_elems = fft.allocSize();
-
-  shafft::complexd *data = nullptr, *work = nullptr;
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &data));
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &work));
-
-  std::vector<shafft::complexd> original(alloc_elems);
-  init_index_tensor(original.data(), localElems, dims, subsize, offset);
-
-  SHAFFT_CHECK(shafft::copyToBuffer(data, original.data(), alloc_elems));
-  SHAFFT_CHECK(fft.setBuffers(data, work));
-
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::BACKWARD));
-  SHAFFT_CHECK(fft.normalize());
-
-  shafft::complexd *final_data, *final_work;
-  SHAFFT_CHECK(fft.getBuffers(&final_data, &final_work));
-
-  std::vector<shafft::complexd> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
-
-  size_t globalN = test::product(dims);
-  bool passed = test::check_rel_error(
-      result.data(), original.data(), localElems, globalN, MPI_COMM_WORLD, test::TOL_D);
-
-  (void)shafft::freeBuffer(data);
-  (void)shafft::freeBuffer(work);
-
-  return passed;
+  return run_fftnd_roundtrip<shafft::complexd>({4, 4, 4, 2, 2, 2, 2}, shafft::FFTType::Z2Z, test::TOL_D);
 }
 
 // ============================================================================
@@ -505,101 +210,11 @@ static bool test_7d_z2z() {
 // ============================================================================
 
 static bool test_asymmetric_5d() {
-  std::vector<size_t> dims = {8, 4, 2, 4, 8}; // 2048 elements, asymmetric
-
-  std::vector<int> commDims;
-  if (!get_valid_comm_dims(dims, shafft::FFTType::C2C, commDims))
-    return false;
-
-  shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
-
-  std::vector<size_t> subsize(dims.size()), offset(dims.size());
-  SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
-
-  size_t localElems = test::product(subsize);
-  size_t alloc_elems = fft.allocSize();
-
-  shafft::complexf *data = nullptr, *work = nullptr;
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &data));
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &work));
-
-  std::vector<shafft::complexf> original(alloc_elems);
-  init_index_tensor(original.data(), localElems, dims, subsize, offset);
-
-  SHAFFT_CHECK(shafft::copyToBuffer(data, original.data(), alloc_elems));
-  SHAFFT_CHECK(fft.setBuffers(data, work));
-
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::BACKWARD));
-  SHAFFT_CHECK(fft.normalize());
-
-  shafft::complexf *final_data, *final_work;
-  SHAFFT_CHECK(fft.getBuffers(&final_data, &final_work));
-
-  std::vector<shafft::complexf> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
-
-  size_t globalN = test::product(dims);
-  bool passed = test::check_rel_error(
-      result.data(), original.data(), localElems, globalN, MPI_COMM_WORLD, test::TOL_F);
-
-  (void)shafft::freeBuffer(data);
-  (void)shafft::freeBuffer(work);
-
-  return passed;
+  return run_fftnd_roundtrip<shafft::complexf>({8, 4, 2, 4, 8}, shafft::FFTType::C2C, test::TOL_F);
 }
 
 static bool test_prime_dims_5d() {
-  std::vector<size_t> dims = {3, 5, 7, 3, 5}; // 1575 elements, prime factors
-
-  std::vector<int> commDims;
-  if (!get_valid_comm_dims(dims, shafft::FFTType::C2C, commDims))
-    return false;
-
-  shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
-
-  std::vector<size_t> subsize(dims.size()), offset(dims.size());
-  SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
-
-  size_t localElems = test::product(subsize);
-  size_t alloc_elems = fft.allocSize();
-
-  shafft::complexf *data = nullptr, *work = nullptr;
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &data));
-  SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &work));
-
-  std::vector<shafft::complexf> original(alloc_elems);
-  init_index_tensor(original.data(), localElems, dims, subsize, offset);
-
-  SHAFFT_CHECK(shafft::copyToBuffer(data, original.data(), alloc_elems));
-  SHAFFT_CHECK(fft.setBuffers(data, work));
-
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
-  SHAFFT_CHECK(fft.execute(shafft::FFTDirection::BACKWARD));
-  SHAFFT_CHECK(fft.normalize());
-
-  shafft::complexf *final_data, *final_work;
-  SHAFFT_CHECK(fft.getBuffers(&final_data, &final_work));
-
-  std::vector<shafft::complexf> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
-
-  size_t globalN = test::product(dims);
-  bool passed = test::check_rel_error(
-      result.data(), original.data(), localElems, globalN, MPI_COMM_WORLD, test::TOL_F);
-
-  (void)shafft::freeBuffer(data);
-  (void)shafft::freeBuffer(work);
-
-  return passed;
+  return run_fftnd_roundtrip<shafft::complexf>({3, 5, 7, 3, 5}, shafft::FFTType::C2C, test::TOL_F);
 }
 
 int main(int argc, char** argv) {
