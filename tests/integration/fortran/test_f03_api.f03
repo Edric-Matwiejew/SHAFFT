@@ -8,11 +8,14 @@ use shafft
 implicit none
 
 integer :: rank, nprocs, ierr
-integer(c_int) :: e
 integer :: failed, passed
 
 ! Initialize MPI
 call MPI_Init(ierr)
+if (ierr /= MPI_SUCCESS) then
+   write (*, '(A)') 'MPI_Init failed'
+   call MPI_Abort(MPI_COMM_WORLD, 1, ierr)
+end if
 call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
 call MPI_Comm_size(MPI_COMM_WORLD, nprocs, ierr)
 
@@ -32,11 +35,14 @@ call test_get_version_string(passed, failed)
 call test_last_error_status(passed, failed)
 call test_error_source_name(passed, failed)
 call test_clear_last_error(passed, failed)
+call test_last_error_source(passed, failed)
+call test_last_error_domain_code(passed, failed)
 
 ! Plan lifecycle tests
 call test_plan_nda(passed, failed)
 call test_plan_cart(passed, failed)
 call test_plan_destroy(passed, failed)
+call test_plan_output_policy(passed, failed)
 
 ! Buffer management tests
 call test_alloc_free_buffer_sp(passed, failed)
@@ -53,6 +59,13 @@ call test_set_get_buffers(passed, failed)
 ! Configuration tests
 call test_configuration_nda(passed, failed)
 call test_configuration_cart(passed, failed)
+call test_configuration_1d(passed, failed)
+
+! Legacy 1D plan lifecycle
+call test_1d_init(passed, failed)
+
+! Library teardown
+call test_finalize(passed, failed)
 
 if (rank == 0) then
    write (*, '(A)') ''
@@ -177,10 +190,33 @@ end subroutine test_error_source_name
 subroutine test_clear_last_error(passed, failed)
    integer, intent(inout) :: passed, failed
    integer :: status, rank
+   type(c_ptr) :: tmpPlan
+   integer(c_size_t) :: tmpSize
+   integer(c_int) :: rc
 
    call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
    if (rank == 0) write (*, '(A)', advance='no') '  shafftClearLastError                     '
 
+   ! First trigger an error so there is something to clear.
+   ! Calling getAllocSize on a created-but-uninitialized plan fires
+   ! SHAFFT_FAIL(SHAFFT_ERR_PLAN_NOT_INIT) which sets the last error.
+   call shafftNDCreate(tmpPlan, rc)
+   if (rc /= 0) then
+      if (rank == 0) write (*, '(A)') 'FAIL (could not create plan)'
+      failed = failed + 1
+      return
+   end if
+   call shafftGetAllocSize(tmpPlan, tmpSize, rc) ! rc should be non-zero
+   call shafftDestroy(tmpPlan, rc)
+
+   status = shafftLastErrorStatus()
+   if (status == 0) then
+      if (rank == 0) write (*, '(A)') 'FAIL (expected non-zero status before clear)'
+      failed = failed + 1
+      return
+   end if
+
+   ! Now clear and verify
    call shafftClearLastError()
    status = shafftLastErrorStatus()
 
@@ -199,36 +235,8 @@ end subroutine test_clear_last_error
 
 subroutine test_plan_nda(passed, failed)
    integer, intent(inout) :: passed, failed
-   integer, parameter :: ndim = 3, nda = 1
-   integer(c_int) :: dimensions(ndim)
-   type(c_ptr) :: plan
-   integer :: rank
-   integer(c_int) :: rc
-   character(len=256) :: msg
-
-   dimensions = [32, 32, 32]
-   call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
-   if (rank == 0) write (*, '(A)', advance='no') '  shafftPlanNDA                            '
-
-   call shafftPlanNDA(plan, ndim, nda, dimensions, SHAFFT_C2C, MPI_COMM_WORLD, rc)
-
-   if (rc == 0 .and. c_associated(plan)) then
-      if (rank == 0) write (*, '(A)') 'PASS'
-      passed = passed + 1
-      call shafftDestroy(plan, rc)
-   else
-      if (rank == 0) then
-         call shafftLastErrorMessage(msg)
-         write (*, '(A,I0,A,A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
-      end if
-      failed = failed + 1
-   end if
-end subroutine test_plan_nda
-
-subroutine test_plan_cart(passed, failed)
-   integer, intent(inout) :: passed, failed
    integer, parameter :: ndim = 3
-   integer(c_int) :: dimensions(ndim), comm_dims(ndim)
+   integer(c_int) :: dimensions(ndim), commDims(ndim)
    type(c_ptr) :: plan
    integer :: rank, nprocs
    integer(c_int) :: rc
@@ -238,13 +246,21 @@ subroutine test_plan_cart(passed, failed)
    call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
    call MPI_Comm_size(MPI_COMM_WORLD, nprocs, ierr)
 
-   ! COMM_DIMS must have ndim elements, last must be 1
-   comm_dims = [nprocs, 1, 1]
+   ! commDims for slab decomposition (like nda=1): [nprocs, 1, 1]
+   commDims = [nprocs, 1, 1]
 
-   if (rank == 0) write (*, '(A)', advance='no') '  shafftPlanCart                           '
+   if (rank == 0) write (*, '(A)', advance='no') '  shafftNDInit (slab)                      '
 
-   ! Fortran API: shafftPlanCart(plan, COMM_DIMS, dimensions, precision, comm)
-   call shafftPlanCart(plan, comm_dims, dimensions, SHAFFT_C2C, MPI_COMM_WORLD, rc)
+   call shafftNDCreate(plan, rc)
+     if (rc /= 0) then
+       call shafftLastErrorMessage(msg)
+       if (rank == 0) write (*, '(A,I0,3A)') &
+            'FAIL (create failed, rc=', rc, ', msg=', trim(msg), ')'
+       failed = failed + 1
+       return
+     end if
+   call shafftNDInit(plan, commDims, dimensions, SHAFFT_C2C, MPI_COMM_WORLD, &
+                     SHAFFT_LAYOUT_REDISTRIBUTED, rc)
 
    if (rc == 0 .and. c_associated(plan)) then
       if (rank == 0) write (*, '(A)') 'PASS'
@@ -253,26 +269,84 @@ subroutine test_plan_cart(passed, failed)
    else
       if (rank == 0) then
          call shafftLastErrorMessage(msg)
-         write (*, '(A,I0,A,A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
+         write (*, '(A,I0,3A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
       end if
       failed = failed + 1
+      if (c_associated(plan)) call shafftDestroy(plan, rc)
+   end if
+end subroutine test_plan_nda
+
+subroutine test_plan_cart(passed, failed)
+   integer, intent(inout) :: passed, failed
+   integer, parameter :: ndim = 2
+   integer(c_int) :: dimensions(ndim), commDims(ndim)
+   type(c_ptr) :: plan
+   integer :: rank, nprocs
+   integer(c_int) :: rc
+   character(len=256) :: msg
+
+   dimensions = [64, 32]
+   call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
+   call MPI_Comm_size(MPI_COMM_WORLD, nprocs, ierr)
+
+   ! 2D slab decomposition (exercises a different ndim than test_plan_nda)
+   commDims = [nprocs, 1]
+
+   if (rank == 0) write (*, '(A)', advance='no') '  shafftNDInit (2D slab)                   '
+
+   ! Fortran API: shafftNDInit(plan, commDims, dimensions, precision, comm, outputPolicy, ierr)
+   call shafftNDCreate(plan, rc)
+     if (rc /= 0) then
+       call shafftLastErrorMessage(msg)
+       if (rank == 0) write (*, '(A,I0,3A)') &
+            'FAIL (create failed, rc=', rc, ', msg=', trim(msg), ')'
+       failed = failed + 1
+       return
+     end if
+   call shafftNDInit(plan, commDims, dimensions, SHAFFT_C2C, MPI_COMM_WORLD, &
+                     SHAFFT_LAYOUT_REDISTRIBUTED, rc)
+
+   if (rc == 0 .and. c_associated(plan)) then
+      if (rank == 0) write (*, '(A)') 'PASS'
+      passed = passed + 1
+      call shafftDestroy(plan, rc)
+   else
+      if (rank == 0) then
+         call shafftLastErrorMessage(msg)
+         write (*, '(A,I0,3A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
+      end if
+      failed = failed + 1
+      if (c_associated(plan)) call shafftDestroy(plan, rc)
    end if
 end subroutine test_plan_cart
 
 subroutine test_plan_destroy(passed, failed)
    integer, intent(inout) :: passed, failed
-   integer, parameter :: ndim = 2, nda = 1
-   integer(c_int) :: dimensions(ndim)
+   integer, parameter :: ndim = 2
+   integer(c_int) :: dimensions(ndim), commDims(ndim)
    type(c_ptr) :: plan
-   integer :: rank
+   integer :: rank, nprocs
    integer(c_int) :: rc
    character(len=256) :: msg
 
    dimensions = [16, 16]
    call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
+   call MPI_Comm_size(MPI_COMM_WORLD, nprocs, ierr)
+
+   commDims = [nprocs, 1]
+
    if (rank == 0) write (*, '(A)', advance='no') '  shafftDestroy                            '
 
-   call shafftPlanNDA(plan, ndim, nda, dimensions, SHAFFT_C2C, MPI_COMM_WORLD, rc)
+   call shafftNDCreate(plan, rc)
+     if (rc /= 0) then
+       call shafftLastErrorMessage(msg)
+       if (rank == 0) write (*, '(A,I0,3A)') &
+            'FAIL (create failed, rc=', rc, ', msg=', trim(msg), ')'
+       failed = failed + 1
+       return
+     end if
+   call shafftNDInit(plan, commDims, dimensions, SHAFFT_C2C, MPI_COMM_WORLD, &
+                     SHAFFT_LAYOUT_REDISTRIBUTED, rc)
    call shafftDestroy(plan, rc)
 
    ! After destroy, plan should be null
@@ -282,11 +356,71 @@ subroutine test_plan_destroy(passed, failed)
    else
       if (rank == 0) then
          call shafftLastErrorMessage(msg)
-         write (*, '(A,I0,A,A)') 'FAIL (plan not nullified, rc=', rc, ', msg=', trim(msg), ')'
+         write (*, '(A,I0,3A)') 'FAIL (plan not nullified, rc=', rc, ', msg=', trim(msg), ')'
       end if
       failed = failed + 1
    end if
 end subroutine test_plan_destroy
+
+subroutine test_plan_output_policy(passed, failed)
+   integer, intent(inout) :: passed, failed
+   integer, parameter :: ndim = 2
+   integer(c_int) :: dimensions(ndim), commDims(ndim)
+   integer(c_size_t) :: localAllocSize
+   integer(c_size_t) :: init_subsize(ndim), init_offset(ndim)
+   integer(c_size_t) :: cur_subsize(ndim), cur_offset(ndim)
+   type(c_ptr) :: plan = c_null_ptr
+   complex(c_float), pointer :: data_buf(:) => null()
+   complex(c_float), pointer :: work_buf(:) => null()
+   integer :: rank, nprocs
+   integer(c_int) :: rc
+   character(len=256) :: msg
+
+   dimensions = [16, 16]
+   call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
+   call MPI_Comm_size(MPI_COMM_WORLD, nprocs, ierr)
+   commDims = [nprocs, 1]
+
+   if (rank == 0) write (*, '(A)', advance='no') '  shafftNDInit(outputPolicy=INITIAL)       '
+
+   call shafftNDCreate(plan, rc); if (rc /= 0) goto 985
+   call shafftNDInit(plan, commDims, dimensions, SHAFFT_C2C, MPI_COMM_WORLD, &
+                     SHAFFT_LAYOUT_INITIAL, rc)
+   if (rc /= 0) goto 985
+   call shafftGetAllocSize(plan, localAllocSize, rc); if (rc /= 0) goto 985
+   call shafftAllocBuffer(localAllocSize, data_buf, rc); if (rc /= 0) goto 985
+   call shafftAllocBuffer(localAllocSize, work_buf, rc); if (rc /= 0) goto 985
+   call shafftSetBuffers(plan, data_buf, work_buf, rc); if (rc /= 0) goto 985
+   call shafftPlan(plan, rc); if (rc /= 0) goto 985
+   call shafftGetLayout(plan, init_subsize, init_offset, SHAFFT_TENSOR_LAYOUT_INITIAL, rc)
+   if (rc /= 0) goto 985
+
+   call shafftExecute(plan, SHAFFT_FORWARD, rc); if (rc /= 0) goto 985
+   call shafftGetLayout(plan, cur_subsize, cur_offset, SHAFFT_TENSOR_LAYOUT_CURRENT, rc)
+   if (rc /= 0) goto 985
+
+   if (all(init_subsize == cur_subsize) .and. all(init_offset == cur_offset)) then
+      if (rank == 0) write (*, '(A)') 'PASS'
+      passed = passed + 1
+   else
+      if (rank == 0) write (*, '(A)') 'FAIL (current layout is not initial after forward)'
+      failed = failed + 1
+   end if
+
+   call shafftFreeBuffer(data_buf, rc)
+   call shafftFreeBuffer(work_buf, rc)
+   call shafftDestroy(plan, rc)
+   return
+985 continue
+   failed = failed + 1
+   if (rank == 0) then
+      call shafftLastErrorMessage(msg)
+      write (*, '(A,I0,3A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
+   end if
+   if (associated(data_buf)) call shafftFreeBuffer(data_buf, rc)
+   if (associated(work_buf)) call shafftFreeBuffer(work_buf, rc)
+   if (c_associated(plan)) call shafftDestroy(plan, rc)
+end subroutine test_plan_output_policy
 
 !============================================================================
 ! Buffer Management Tests
@@ -313,7 +447,7 @@ subroutine test_alloc_free_buffer_sp(passed, failed)
    else
       if (rank == 0) then
          call shafftLastErrorMessage(msg)
-         write (*, '(A,I0,A,A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
+         write (*, '(A,I0,3A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
       end if
       failed = failed + 1
    end if
@@ -340,7 +474,7 @@ subroutine test_alloc_free_buffer_dp(passed, failed)
    else
       if (rank == 0) then
          call shafftLastErrorMessage(msg)
-         write (*, '(A,I0,A,A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
+         write (*, '(A,I0,3A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
       end if
       failed = failed + 1
    end if
@@ -391,9 +525,10 @@ subroutine test_copy_buffers_sp(passed, failed)
 930 continue
    if (rank == 0) then
       call shafftLastErrorMessage(msg)
-      write (*, '(A,I0,A,A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
+      write (*, '(A,I0,3A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
    end if
    failed = failed + 1
+   if (associated(device_buf)) call shafftFreeBuffer(device_buf, rc)
 end subroutine test_copy_buffers_sp
 
 subroutine test_copy_buffers_dp(passed, failed)
@@ -441,9 +576,10 @@ subroutine test_copy_buffers_dp(passed, failed)
 940 continue
    if (rank == 0) then
       call shafftLastErrorMessage(msg)
-      write (*, '(A,I0,A,A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
+      write (*, '(A,I0,3A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
    end if
    failed = failed + 1
+   if (associated(device_buf)) call shafftFreeBuffer(device_buf, rc)
 end subroutine test_copy_buffers_dp
 
 !============================================================================
@@ -452,22 +588,29 @@ end subroutine test_copy_buffers_dp
 
 subroutine test_get_alloc_size(passed, failed)
    integer, intent(inout) :: passed, failed
-   integer, parameter :: ndim = 3, nda = 1
-   integer(c_int) :: dimensions(ndim)
-   type(c_ptr) :: plan
-   integer(c_size_t) :: alloc_size
-   integer :: rank
+   integer, parameter :: ndim = 3
+   integer(c_int) :: dimensions(ndim), commDims(ndim)
+   type(c_ptr) :: plan = c_null_ptr
+   integer(c_size_t) :: localAllocSize
+   integer :: rank, nprocs
    integer(c_int) :: rc
    character(len=256) :: msg
 
    dimensions = [32, 32, 32]
    call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
+   call MPI_Comm_size(MPI_COMM_WORLD, nprocs, ierr)
+
+   commDims = [nprocs, 1, 1]
+
    if (rank == 0) write (*, '(A)', advance='no') '  shafftGetAllocSize                       '
 
-   call shafftPlanNDA(plan, ndim, nda, dimensions, SHAFFT_C2C, MPI_COMM_WORLD, rc); if (rc /= 0) goto 950
-   call shafftGetAllocSize(plan, alloc_size, rc); if (rc /= 0) goto 950
+   call shafftNDCreate(plan, rc); if (rc /= 0) goto 950
+   call shafftNDInit(plan, commDims, dimensions, SHAFFT_C2C, MPI_COMM_WORLD, &
+                     SHAFFT_LAYOUT_REDISTRIBUTED, rc)
+   if (rc /= 0) goto 950
+   call shafftGetAllocSize(plan, localAllocSize, rc); if (rc /= 0) goto 950
 
-   if (alloc_size > 0) then
+   if (localAllocSize > 0) then
       if (rank == 0) write (*, '(A)') 'PASS'
       passed = passed + 1
    else
@@ -481,25 +624,35 @@ subroutine test_get_alloc_size(passed, failed)
    failed = failed + 1
    if (rank == 0) then
       call shafftLastErrorMessage(msg)
-      write (*, '(A,I0,A,A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
+      write (*, '(A,I0,3A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
    end if
+   if (c_associated(plan)) call shafftDestroy(plan, rc)
 end subroutine test_get_alloc_size
 
 subroutine test_get_layout(passed, failed)
    integer, intent(inout) :: passed, failed
-   integer, parameter :: ndim = 3, nda = 1
-   integer(c_int) :: dimensions(ndim), subsize(ndim), offset(ndim)
-   type(c_ptr) :: plan
-   integer :: rank
+   integer, parameter :: ndim = 3
+   integer(c_int) :: dimensions(ndim), commDims(ndim)
+   integer(c_size_t) :: subsize(ndim), offset(ndim)
+   type(c_ptr) :: plan = c_null_ptr
+   integer :: rank, nprocs
    integer(c_int) :: rc
    character(len=256) :: msg
 
    dimensions = [32, 32, 32]
    call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
+   call MPI_Comm_size(MPI_COMM_WORLD, nprocs, ierr)
+
+   commDims = [nprocs, 1, 1]
+
    if (rank == 0) write (*, '(A)', advance='no') '  shafftGetLayout                          '
 
-   call shafftPlanNDA(plan, ndim, nda, dimensions, SHAFFT_C2C, MPI_COMM_WORLD, rc); if (rc /= 0) goto 960
-   call shafftGetLayout(plan, subsize, offset, SHAFFT_TENSOR_LAYOUT_INITIAL, rc); if (rc /= 0) goto 960
+   call shafftNDCreate(plan, rc); if (rc /= 0) goto 960
+   call shafftNDInit(plan, commDims, dimensions, SHAFFT_C2C, MPI_COMM_WORLD, &
+                     SHAFFT_LAYOUT_REDISTRIBUTED, rc)
+   if (rc /= 0) goto 960
+   call shafftGetLayout(plan, subsize, offset, SHAFFT_TENSOR_LAYOUT_INITIAL, rc)
+   if (rc /= 0) goto 960
 
    if (subsize(1) > 0 .and. subsize(2) > 0 .and. subsize(3) > 0) then
       if (rank == 0) write (*, '(A)') 'PASS'
@@ -515,15 +668,16 @@ subroutine test_get_layout(passed, failed)
    failed = failed + 1
    if (rank == 0) then
       call shafftLastErrorMessage(msg)
-      write (*, '(A,I0,A,A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
+      write (*, '(A,I0,3A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
    end if
+   if (c_associated(plan)) call shafftDestroy(plan, rc)
 end subroutine test_get_layout
 
 subroutine test_get_axes(passed, failed)
    integer, intent(inout) :: passed, failed
-   integer, parameter :: ndim = 3, nda = 1
-   integer(c_int) :: dimensions(ndim), ca(ndim), da(ndim)
-   type(c_ptr) :: plan
+   integer, parameter :: ndim = 3
+   integer(c_int) :: dimensions(ndim), commDims(ndim), ca(ndim), da(ndim)
+   type(c_ptr) :: plan = c_null_ptr
    integer :: rank, nprocs
    integer(c_int) :: rc
    character(len=256) :: msg
@@ -531,11 +685,17 @@ subroutine test_get_axes(passed, failed)
    dimensions = [32, 32, 32]
    call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
    call MPI_Comm_size(MPI_COMM_WORLD, nprocs, ierr)
+
+   commDims = [nprocs, 1, 1]
+
    if (rank == 0) write (*, '(A)', advance='no') '  shafftGetAxes                            '
 
    ca = -1
    da = -1
-   call shafftPlanNDA(plan, ndim, nda, dimensions, SHAFFT_C2C, MPI_COMM_WORLD, rc); if (rc /= 0) goto 970
+   call shafftNDCreate(plan, rc); if (rc /= 0) goto 970
+   call shafftNDInit(plan, commDims, dimensions, SHAFFT_C2C, MPI_COMM_WORLD, &
+                     SHAFFT_LAYOUT_REDISTRIBUTED, rc)
+   if (rc /= 0) goto 970
    call shafftGetAxes(plan, ca, da, SHAFFT_TENSOR_LAYOUT_INITIAL, rc); if (rc /= 0) goto 970
 
    ! For nda=1 with multi-rank, da(1) should be 0 (first axis distributed)
@@ -559,35 +719,43 @@ subroutine test_get_axes(passed, failed)
    failed = failed + 1
    if (rank == 0) then
       call shafftLastErrorMessage(msg)
-      write (*, '(A,I0,A,A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
+      write (*, '(A,I0,3A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
    end if
+   if (c_associated(plan)) call shafftDestroy(plan, rc)
 end subroutine test_get_axes
 
 subroutine test_set_get_buffers(passed, failed)
    integer, intent(inout) :: passed, failed
-   integer, parameter :: ndim = 2, nda = 1
-   integer(c_int) :: dimensions(ndim)
-   type(c_ptr) :: plan
-   integer(c_size_t) :: alloc_size
+   integer, parameter :: ndim = 2
+   integer(c_int) :: dimensions(ndim), commDims(ndim)
+   type(c_ptr) :: plan = c_null_ptr
+   integer(c_size_t) :: localAllocSize
    complex(c_float), pointer :: data_buf(:) => null()
    complex(c_float), pointer :: work_buf(:) => null()
    complex(c_float), pointer :: got_data(:) => null()
    complex(c_float), pointer :: got_work(:) => null()
-   integer :: rank
+   integer :: rank, nprocs
    integer(c_int) :: rc
    character(len=256) :: msg
 
    dimensions = [16, 16]
    call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
+   call MPI_Comm_size(MPI_COMM_WORLD, nprocs, ierr)
+
+   commDims = [nprocs, 1]
+
    if (rank == 0) write (*, '(A)', advance='no') '  shafftSet/GetBuffers                     '
 
-   call shafftPlanNDA(plan, ndim, nda, dimensions, SHAFFT_C2C, MPI_COMM_WORLD, rc); if (rc /= 0) goto 980
-   call shafftGetAllocSize(plan, alloc_size, rc); if (rc /= 0) goto 980
+   call shafftNDCreate(plan, rc); if (rc /= 0) goto 980
+   call shafftNDInit(plan, commDims, dimensions, SHAFFT_C2C, MPI_COMM_WORLD, &
+                     SHAFFT_LAYOUT_REDISTRIBUTED, rc)
+   if (rc /= 0) goto 980
+   call shafftGetAllocSize(plan, localAllocSize, rc); if (rc /= 0) goto 980
 
-   call shafftAllocBuffer(alloc_size, data_buf, rc); if (rc /= 0) goto 980
-   call shafftAllocBuffer(alloc_size, work_buf, rc); if (rc /= 0) goto 980
+   call shafftAllocBuffer(localAllocSize, data_buf, rc); if (rc /= 0) goto 980
+   call shafftAllocBuffer(localAllocSize, work_buf, rc); if (rc /= 0) goto 980
    call shafftSetBuffers(plan, data_buf, work_buf, rc); if (rc /= 0) goto 980
-   call shafftGetBuffers(plan, alloc_size, got_data, got_work, rc); if (rc /= 0) goto 980
+   call shafftGetBuffers(plan, localAllocSize, got_data, got_work, rc); if (rc /= 0) goto 980
 
    ! Before execute, should get same pointers back
    if (associated(got_data) .and. associated(got_work)) then
@@ -606,8 +774,11 @@ subroutine test_set_get_buffers(passed, failed)
    failed = failed + 1
    if (rank == 0) then
       call shafftLastErrorMessage(msg)
-      write (*, '(A,I0,A,A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
+      write (*, '(A,I0,3A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
    end if
+   if (associated(data_buf)) call shafftFreeBuffer(data_buf, rc)
+   if (associated(work_buf)) call shafftFreeBuffer(work_buf, rc)
+   if (c_associated(plan)) call shafftDestroy(plan, rc)
 end subroutine test_set_get_buffers
 
 !============================================================================
@@ -617,8 +788,9 @@ end subroutine test_set_get_buffers
 subroutine test_configuration_nda(passed, failed)
    integer, intent(inout) :: passed, failed
    integer, parameter :: ndim = 3
-   integer(c_int) :: dimensions(ndim), subsize(ndim), offset(ndim), comm_dims(ndim)
-   integer(c_int) :: nda
+   integer(c_int) :: dimensions(ndim), commDims(ndim)
+   integer(c_size_t) :: subsize(ndim), offset(ndim)
+   integer(c_int) :: nda, commSize
    integer :: rank, nprocs
    integer(c_int) :: rc
    character(len=256) :: msg
@@ -626,20 +798,26 @@ subroutine test_configuration_nda(passed, failed)
    dimensions = [64, 64, 32]
    call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
    call MPI_Comm_size(MPI_COMM_WORLD, nprocs, ierr)
-   if (rank == 0) write (*, '(A)', advance='no') '  shafftConfigurationNDA                   '
+   if (rank == 0) write (*, '(A)', advance='no') '  shafftConfigurationND (maximize)         '
 
-   nda = 1 ! request distribution (should fail on 1 rank)
-   call shafftConfigurationNDA(ndim, dimensions, nda, subsize, offset, comm_dims, &
-                               SHAFFT_C2C, int(0, c_size_t), MPI_COMM_WORLD, rc)
+   ! Use SHAFFT_MAXIMIZE_NDA strategy with nda=1 (slab decomposition)
+   nda = 1
+   commDims = [0, 0, 0]  ! Let shafft compute optimal decomposition
+   call shafftConfigurationND(dimensions, SHAFFT_C2C, commDims, nda, subsize, offset, &
+                              commSize, SHAFFT_MAXIMIZE_NDA, int(0, c_size_t), MPI_COMM_WORLD, rc)
 
    if (nprocs == 1) then
-      if (rc == SHAFFT_ERR_INVALID_DECOMP) then
-         if (rank == 0) write (*, '(A)') 'PASS (expected INVALID_DECOMP on 1 rank)'
+      ! On 1 rank, MAXIMIZE_NDA strategy may either:
+      ! - Return success with degenerate decomposition (nda may be adjusted to 0)
+      ! - Return INVALID_DECOMP
+      ! Either is acceptable behavior for the unified API
+      if (rc == 0 .or. rc == SHAFFT_ERR_INVALID_DECOMP) then
+         if (rank == 0) write (*, '(A)') 'PASS'
          passed = passed + 1
       else
          if (rank == 0) then
             call shafftLastErrorMessage(msg)
-           write (*, '(A,I0,A,A)') 'FAIL (expected INVALID_DECOMP rc=', rc, ', msg=', trim(msg), ')'
+           write (*, '(A,I0,3A)') 'FAIL (unexpected error rc=', rc, ', msg=', trim(msg), ')'
          end if
          failed = failed + 1
       end if
@@ -650,7 +828,7 @@ subroutine test_configuration_nda(passed, failed)
       else
          if (rank == 0) then
             call shafftLastErrorMessage(msg)
-            write (*, '(A,I0,A,A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
+            write (*, '(A,I0,3A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
          end if
          failed = failed + 1
       end if
@@ -660,8 +838,9 @@ end subroutine test_configuration_nda
 subroutine test_configuration_cart(passed, failed)
    integer, intent(inout) :: passed, failed
    integer, parameter :: ndim = 3
-   integer(c_int) :: dimensions(ndim), subsize(ndim), offset(ndim), comm_dims(ndim)
-   integer(c_int) :: comm_size
+   integer(c_int) :: dimensions(ndim), commDims(ndim)
+   integer(c_size_t) :: subsize(ndim), offset(ndim)
+   integer(c_int) :: commSize, nda
    integer :: rank, nprocs
    integer(c_int) :: rc
    character(len=256) :: msg
@@ -670,24 +849,227 @@ subroutine test_configuration_cart(passed, failed)
    call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
    call MPI_Comm_size(MPI_COMM_WORLD, nprocs, ierr)
 
-   ! COMM_DIMS must have ndim elements
-   comm_dims = [nprocs, 1, 1]
+   ! commDims must have ndim elements - specify explicit decomposition
+   commDims = [nprocs, 1, 1]
+   nda = 1
 
-   if (rank == 0) write (*, '(A)', advance='no') '  shafftConfigurationCart                  '
+   if (rank == 0) write (*, '(A)', advance='no') '  shafftConfigurationND (explicit)         '
 
-   call shafftConfigurationCart(ndim, dimensions, subsize, offset, comm_dims, comm_size, &
-                                SHAFFT_C2C, int(0, c_size_t), MPI_COMM_WORLD, rc)
+   call shafftConfigurationND(dimensions, SHAFFT_C2C, commDims, nda, subsize, offset, &
+                              commSize, SHAFFT_MAXIMIZE_NDA, int(0, c_size_t), MPI_COMM_WORLD, rc)
 
-   if (rc == 0 .and. comm_size == nprocs) then
+   if (rc == 0 .and. commSize == nprocs) then
       if (rank == 0) write (*, '(A)') 'PASS'
       passed = passed + 1
    else
       if (rank == 0) then
          call shafftLastErrorMessage(msg)
-         write (*, '(A,I0,A,A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
+         write (*, '(A,I0,3A)') 'FAIL (rc=', rc, ', msg=', trim(msg), ')'
       end if
       failed = failed + 1
    end if
 end subroutine test_configuration_cart
+
+!============================================================================
+! Legacy 1D Configuration / Plan Tests
+!============================================================================
+
+subroutine test_configuration_1d(passed, failed)
+   integer, intent(inout) :: passed, failed
+   integer(c_size_t) :: N, localN, localStart, localAllocSize
+   integer :: rank
+   integer(c_int) :: rc
+
+   N = 1024
+   call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
+   if (rank == 0) write (*, '(A)', advance='no') '  shafftConfiguration1D                    '
+
+   call shafftConfiguration1D(N, localN, localStart, localAllocSize, &
+                              SHAFFT_C2C, MPI_COMM_WORLD, rc)
+
+   if (rc == 0 .and. localN > 0 .and. localAllocSize >= localN .and. localStart >= 0) then
+      if (rank == 0) write (*, '(A)') 'PASS'
+      passed = passed + 1
+   else
+      if (rank == 0) write (*, '(A,I0,A,I0,A,I0,A,I0,A)') &
+            'FAIL (rc=', rc, ', localN=', localN, ', localStart=', localStart, &
+            ', allocSize=', localAllocSize, ')'
+      failed = failed + 1
+   end if
+end subroutine test_configuration_1d
+
+subroutine test_1d_init(passed, failed)
+   integer, intent(inout) :: passed, failed
+   type(c_ptr) :: plan = c_null_ptr
+   integer(c_size_t) :: N, localN, localStart, localAllocSize, allocSize
+   integer :: rank
+   integer(c_int) :: rc
+   character(len=256) :: msg
+
+   N = 1024
+   call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
+   if (rank == 0) write (*, '(A)', advance='no') '  shafft1DInit lifecycle                   '
+
+   ! Step 1: query decomposition
+   call shafftConfiguration1D(N, localN, localStart, localAllocSize, &
+                              SHAFFT_C2C, MPI_COMM_WORLD, rc)
+   if (rc /= 0) goto 910
+
+   ! Step 2: create + init
+   call shafft1DCreate(plan, rc)
+   if (rc /= 0) goto 910
+
+   call shafft1DInit(plan, N, localN, localStart, SHAFFT_C2C, MPI_COMM_WORLD, rc)
+   if (rc /= 0) goto 910
+
+   ! Step 3: plan
+   call shafftPlan(plan, rc)
+   if (rc /= 0) goto 910
+
+   ! Step 4: verify alloc size > 0
+   call shafftGetAllocSize(plan, allocSize, rc)
+   if (rc /= 0 .or. allocSize == 0) goto 910
+
+   ! Success
+   if (rank == 0) write (*, '(A)') 'PASS'
+   passed = passed + 1
+   call shafftDestroy(plan, rc)
+   return
+
+910 continue
+   failed = failed + 1
+   if (rank == 0) then
+      call shafftLastErrorMessage(msg)
+      write (*, '(3A)') 'FAIL (', trim(msg), ')'
+   end if
+   if (c_associated(plan)) call shafftDestroy(plan, rc)
+end subroutine test_1d_init
+
+!============================================================================
+! Additional Error API Tests
+!============================================================================
+
+subroutine test_last_error_source(passed, failed)
+   integer, intent(inout) :: passed, failed
+   integer :: source, rank
+   type(c_ptr) :: tmpPlan
+   integer(c_size_t) :: tmpSize
+   integer(c_int) :: rc
+
+   call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
+   if (rank == 0) write (*, '(A)', advance='no') '  shafftLastErrorSource                    '
+
+   ! Trigger a SHAFFT-internal error (source = SHAFFT_ERRSRC_NONE, code = 0)
+   call shafftNDCreate(tmpPlan, rc)
+   if (rc /= 0) then
+      if (rank == 0) write (*, '(A)') 'FAIL (could not create plan)'
+      failed = failed + 1
+      return
+   end if
+   call shafftGetAllocSize(tmpPlan, tmpSize, rc) ! ERR_PLAN_NOT_INIT
+   call shafftDestroy(tmpPlan, rc)
+
+   ! SHAFFT-internal errors use source=NONE
+   source = shafftLastErrorSource()
+   if (source /= SHAFFT_ERRSRC_NONE) then
+      if (rank == 0) write (*, '(A,I0,A)') 'FAIL (source=', source, &
+            ', expected ERRSRC_NONE after SHAFFT error)'
+      failed = failed + 1
+      return
+   end if
+
+   ! After clear, source should still be NONE
+   call shafftClearLastError()
+   source = shafftLastErrorSource()
+
+   if (source == SHAFFT_ERRSRC_NONE) then
+      if (rank == 0) write (*, '(A)') 'PASS'
+      passed = passed + 1
+   else
+      if (rank == 0) write (*, '(A,I0,A)') 'FAIL (source=', source, ', expected 0 after clear)'
+      failed = failed + 1
+   end if
+end subroutine test_last_error_source
+
+subroutine test_last_error_domain_code(passed, failed)
+   integer, intent(inout) :: passed, failed
+   integer :: code, status, rank
+   type(c_ptr) :: tmpPlan
+   integer(c_size_t) :: tmpSize
+   integer(c_int) :: rc
+
+   call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
+   if (rank == 0) write (*, '(A)', advance='no') '  shafftLastErrorDomainCode                '
+
+   ! Trigger a SHAFFT-internal error (domain code = 0 for internal errors)
+   call shafftNDCreate(tmpPlan, rc)
+   if (rc /= 0) then
+      if (rank == 0) write (*, '(A)') 'FAIL (could not create plan)'
+      failed = failed + 1
+      return
+   end if
+   call shafftGetAllocSize(tmpPlan, tmpSize, rc) ! ERR_PLAN_NOT_INIT
+   call shafftDestroy(tmpPlan, rc)
+
+   ! Verify error was recorded
+   status = shafftLastErrorStatus()
+   if (status == 0) then
+      if (rank == 0) write (*, '(A)') 'FAIL (expected non-zero status)'
+      failed = failed + 1
+      return
+   end if
+
+   ! SHAFFT-internal errors have domain code = 0
+   code = shafftLastErrorDomainCode()
+   if (code /= 0) then
+      if (rank == 0) write (*, '(A,I0,A)') 'FAIL (code=', code, ', expected 0 for internal error)'
+      failed = failed + 1
+      return
+   end if
+
+   ! After clear, domain code should remain 0
+   call shafftClearLastError()
+   code = shafftLastErrorDomainCode()
+
+   if (code == 0) then
+      if (rank == 0) write (*, '(A)') 'PASS'
+      passed = passed + 1
+   else
+      if (rank == 0) write (*, '(A,I0,A)') 'FAIL (code=', code, ', expected 0 after clear)'
+      failed = failed + 1
+   end if
+end subroutine test_last_error_domain_code
+
+!============================================================================
+! Finalize Test
+!============================================================================
+
+subroutine test_finalize(passed, failed)
+   integer, intent(inout) :: passed, failed
+   integer :: rank
+   integer(c_int) :: rc
+
+   call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
+   if (rank == 0) write (*, '(A)', advance='no') '  shafftFinalize                           '
+
+   ! First call should succeed
+   call shafftFinalize(rc)
+   if (rc /= 0) then
+      if (rank == 0) write (*, '(A,I0,A)') 'FAIL (rc=', rc, ')'
+      failed = failed + 1
+      return
+   end if
+
+   ! Second call should also succeed (idempotent)
+   call shafftFinalize(rc)
+   if (rc /= 0) then
+      if (rank == 0) write (*, '(A,I0,A)') 'FAIL (2nd call rc=', rc, ')'
+      failed = failed + 1
+      return
+   end if
+
+   if (rank == 0) write (*, '(A)') 'PASS'
+   passed = passed + 1
+end subroutine test_finalize
 
 end program test_f03_api

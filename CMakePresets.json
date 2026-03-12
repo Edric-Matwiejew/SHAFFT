@@ -23,21 +23,52 @@
         "CMAKE_BUILD_TYPE": "Release",
         "SHAFFT_ENABLE_HIPFFT": "ON",
         "SHAFFT_ENABLE_FFTW": "OFF",
-        "SHAFFT_GPU_AWARE_MPI": "ON"
+        "SHAFFT_GPU_AWARE_MPI": "OFF"
       }
     },
     {
       "name": "hipfft-debug",
       "displayName": "HIP/ROCm Debug",
-      "description": "GPU backend with debug symbols",
+      "description": "GPU backend using hipFFT with debug symbols",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "SHAFFT_ENABLE_HIPFFT": "ON",
         "SHAFFT_ENABLE_FFTW": "OFF",
-        "SHAFFT_GPU_AWARE_MPI": "ON"
+        "SHAFFT_GPU_AWARE_MPI": "OFF"
       }
     },
+    {
+      "name": "hipfft-nogtl-debug-all",
+      "displayName": "HIP/ROCm Debug All (no GTL)",
+      "description": "GPU backend using hipFFT with debug symbols, Fortran bindings, tests, and examples",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SHAFFT_ENABLE_HIPFFT": "ON",
+        "SHAFFT_ENABLE_FFTW": "OFF",
+        "SHAFFT_GPU_AWARE_MPI": "OFF",
+        "SHAFFT_BUILD_FORTRAN": "ON",
+        "SHAFFT_BUILD_TESTING": "ON",
+        "SHAFFT_BUILD_EXAMPLES": "ON"
+      }
+    },
+    {
+      "name": "hipfft-nogtl-release-all",
+      "displayName": "HIP/ROCm Release All (no GTL)",
+      "description": "GPU backend using hipFFT with Fortran bindings, tests, and examples",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SHAFFT_ENABLE_HIPFFT": "ON",
+        "SHAFFT_ENABLE_FFTW": "OFF",
+        "SHAFFT_GPU_AWARE_MPI": "OFF",
+        "SHAFFT_BUILD_FORTRAN": "ON",
+        "SHAFFT_BUILD_TESTING": "ON",
+        "SHAFFT_BUILD_EXAMPLES": "ON"
+      }
+    },
+    
     {
       "name": "hipfft-setonix",
       "displayName": "HIP/ROCm for Setonix (Pawsey)",
@@ -63,12 +94,41 @@
     {
       "name": "fftw-debug",
       "displayName": "FFTW CPU Debug",
-      "description": "CPU-only backend with debug symbols",
+      "description": "CPU-only backend using FFTW3 with debug symbols",
       "inherits": "base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "SHAFFT_ENABLE_HIPFFT": "OFF",
-        "SHAFFT_ENABLE_FFTW": "ON"
+        "SHAFFT_ENABLE_FFTW": "ON",
+        "SHAFFT_BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "fftw-debug-all",
+      "displayName": "FFTW CPU Debug All",
+      "description": "CPU-only backend using FFTW3 with debug symbols, Fortran bindings, tests, and examples",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SHAFFT_ENABLE_HIPFFT": "OFF",
+        "SHAFFT_ENABLE_FFTW": "ON",
+        "SHAFFT_BUILD_FORTRAN": "ON",
+        "SHAFFT_BUILD_TESTING": "ON",
+        "SHAFFT_BUILD_EXAMPLES": "ON"
+      }
+    },
+    {
+      "name": "fftw-release-all",
+      "displayName": "FFTW CPU Release All",
+      "description": "CPU-only backend using FFTW3 with Fortran bindings, tests, and examples",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SHAFFT_ENABLE_HIPFFT": "OFF",
+        "SHAFFT_ENABLE_FFTW": "ON",
+        "SHAFFT_BUILD_FORTRAN": "ON",
+        "SHAFFT_BUILD_TESTING": "ON",
+        "SHAFFT_BUILD_EXAMPLES": "ON"
       }
     }
   ],
@@ -82,6 +142,14 @@
       "configurePreset": "hipfft-debug"
     },
     {
+      "name": "hipfft-nogtl-debug-all",
+      "configurePreset": "hipfft-nogtl-debug-all"
+    },
+    {
+      "name": "hipfft-nogtl-release-all",
+      "configurePreset": "hipfft-nogtl-release-all"
+    },
+    {
       "name": "hipfft-setonix",
       "configurePreset": "hipfft-setonix"
     },
@@ -92,6 +160,14 @@
     {
       "name": "fftw-debug",
       "configurePreset": "fftw-debug"
+    },
+    {
+      "name": "fftw-debug-all",
+      "configurePreset": "fftw-debug-all"
+    },
+    {
+      "name": "fftw-release-all",
+      "configurePreset": "fftw-release-all"
     }
   ],
   "testPresets": [
@@ -105,6 +181,34 @@
     {
       "name": "hipfft",
       "configurePreset": "hipfft-debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "hipfft-nogtl-debug-all",
+      "configurePreset": "hipfft-nogtl-debug-all",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "hipfft-nogtl-release-all",
+      "configurePreset": "hipfft-nogtl-release-all",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "fftw-debug-all",
+      "configurePreset": "fftw-debug-all",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "fftw-release-all",
+      "configurePreset": "fftw-release-all",
       "output": {
         "outputOnFailure": true
       }

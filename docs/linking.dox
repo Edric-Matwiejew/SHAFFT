@@ -1,10 +1,8 @@
 # Linking Guide {#linking-guide}
 
-This guide covers how to compile and link programs that use SHAFFT.
+Compile and link programs that use SHAFFT.
 
-## Overview
-
-Link the SHAFFT library that matches the interface you are using:
+## Libraries
 
 | Interface | Library | Header/Module |
 |-----------|---------|---------------|
@@ -12,17 +10,12 @@ Link the SHAFFT library that matches the interface you are using:
 | C | `libshafftc` | `shafft.h` |
 | Fortran | `libshafftf03` | `shafft.mod` |
 
-In addition to the SHAFFT library, you must link the backend dependencies (FFTW or HIP/hipFFT) and MPI.
-
-## Using CMake (Recommended)
-
-SHAFFT provides CMake package configuration files for easy integration. Simply use `find_package()`:
+## CMake (Recommended)
 
 ```cmake
 cmake_minimum_required(VERSION 3.21)
 project(my_fft_app)
 
-# Find SHAFFT (automatically finds backend dependencies)
 find_package(shafft REQUIRED)
 find_package(MPI REQUIRED)
 
@@ -30,13 +23,11 @@ add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE shafft::shafftc++ MPI::MPI_CXX)
 ```
 
-Configure with the SHAFFT install path:
+Configure with SHAFFT install path:
 
 ```bash
 cmake -DCMAKE_PREFIX_PATH=/opt/shafft ..
 ```
-
-The `shafft::shafftc++`, `shafft::shafftc`, and `shafft::shafftf03` targets automatically include all necessary dependencies (backend libraries, include paths, compile definitions, etc.).
 
 ### Available Targets
 
@@ -44,32 +35,29 @@ The `shafft::shafftc++`, `shafft::shafftc`, and `shafft::shafftf03` targets auto
 |--------|-------------|
 | `shafft::shafftc++` | C++ interface |
 | `shafft::shafftc` | C interface |
-| `shafft::shafftf03` | Fortran interface (if built with `SHAFFT_BUILD_FORTRAN=ON`) |
+| `shafft::shafftf03` | Fortran interface |
 
-For build-tree use (without install), add `${SHAFFT_SOURCE_DIR}/build/include` to `CMAKE_PREFIX_PATH` or include dirs so the generated `shafft_config.h` is found; installed use is handled by `find_package`.
+Targets automatically include backend dependencies.
 
-### Checking Backend at Configure Time
-
-You can query which backend SHAFFT was built with:
+### Check Backend at Configure Time
 
 ```cmake
 find_package(shafft REQUIRED)
 
 if(SHAFFT_BACKEND_HIPFFT)
-  message(STATUS "SHAFFT using HIPFFT backend")
+  message(STATUS "Using hipFFT backend")
 elseif(SHAFFT_BACKEND_FFTW)
-  message(STATUS "SHAFFT using FFTW backend")
+  message(STATUS "Using FFTW backend")
 endif()
 ```
 
 ## Manual Compilation
 
-Replace `/opt/shafft` with your installation prefix in all examples below.
+Replace `/opt/shafft` with your install prefix.
 
 ### FFTW Backend
 
-#### C++
-
+**C++:**
 ```bash
 mpicxx -fopenmp -I/opt/shafft/include \
     -L/opt/shafft/lib -lshafftc++ \
@@ -77,8 +65,7 @@ mpicxx -fopenmp -I/opt/shafft/include \
     -o my_program my_program.cpp
 ```
 
-#### C
-
+**C:**
 ```bash
 mpicc -fopenmp -I/opt/shafft/include \
     -L/opt/shafft/lib -lshafftc \
@@ -86,8 +73,7 @@ mpicc -fopenmp -I/opt/shafft/include \
     -o my_program my_program.c
 ```
 
-#### Fortran
-
+**Fortran:**
 ```bash
 mpifort -fopenmp -I/opt/shafft/include \
     -L/opt/shafft/lib -lshafftf03 \
@@ -97,10 +83,7 @@ mpifort -fopenmp -I/opt/shafft/include \
 
 ### hipFFT Backend
 
-For GPU builds, programs must also link against hipFFT and the HIP runtime.
-
-#### C++
-
+**C++:**
 ```bash
 hipcc -I/opt/shafft/include -I$ROCM_PATH/include \
     -L/opt/shafft/lib -lshafftc++ \
@@ -109,8 +92,7 @@ hipcc -I/opt/shafft/include -I$ROCM_PATH/include \
     -o my_program my_program.cpp
 ```
 
-#### C
-
+**C:**
 ```bash
 mpicc -I/opt/shafft/include \
     -L/opt/shafft/lib -lshafftc \
@@ -118,8 +100,7 @@ mpicc -I/opt/shafft/include \
     -o my_program my_program.c
 ```
 
-#### Fortran
-
+**Fortran:**
 ```bash
 mpifort -I/opt/shafft/include \
     -L/opt/shafft/lib -lshafftf03 \
@@ -129,93 +110,27 @@ mpifort -I/opt/shafft/include \
 
 ## Runtime Library Path
 
-If the SHAFFT library is not in a standard location, set the runtime library path.
+If SHAFFT is not in a standard location:
 
-### Environment Variable
-
+**Environment:**
 ```bash
 export LD_LIBRARY_PATH=/opt/shafft/lib:$LD_LIBRARY_PATH
 ```
 
-### Compile-Time RPATH
-
+**Compile-time RPATH:**
 ```bash
 mpicxx -Wl,-rpath,/opt/shafft/lib ...
 ```
 
-### CMake RPATH
-
+**CMake RPATH:**
 ```cmake
 set_target_properties(myapp PROPERTIES
-    INSTALL_RPATH "${SHAFFT_PATH}/lib"
-    BUILD_WITH_INSTALL_RPATH TRUE
-)
+    INSTALL_RPATH "/opt/shafft/lib"
+    BUILD_WITH_INSTALL_RPATH TRUE)
 ```
-
-## Troubleshooting
-
-### Undefined Symbols
-
-If you see undefined symbol errors at link time:
-
-1. **Check library order**: Libraries must be listed after the objects that use them
-2. **Verify backend libraries**: Ensure FFTW or HIP libraries are linked
-3. **Check library path**: Use `ldd` (Linux) or `otool -L` (macOS) to verify library resolution
-
-```bash
-ldd ./my_program | grep -E "shafft|fftw|hip"
-```
-
-### Missing Headers
-
-If headers are not found:
-
-```bash
-# Check include path (headers are in shafft/ subdirectory)
-ls /opt/shafft/include/shafft/
-# Should contain: shafft.h shafft.hpp shafft_config.h shafft_types.hpp shafft_error.hpp
-```
-
-### Fortran Module Not Found
-
-The Fortran module file must be in the include path:
-
-```bash
-ls /opt/shafft/include/shafft.mod
-```
-
-If using a different compiler than the one used to build SHAFFT, you may need to rebuild SHAFFT with your compiler (Fortran `.mod` files are compiler-specific).
-
-## Backend-Specific Notes
-
-### FFTW Threading
-
-The FFTW backend requires a threading library. If you see errors about `fftw3_threads`:
-
-```bash
-# Check which threading library is available
-pkg-config --libs fftw3_threads   # pthreads version
-pkg-config --libs fftw3_omp       # OpenMP version
-```
-
-Link the one that matches your FFTW installation.
-
-### hipFFT with MPI
-
-When using `hipcc` with MPI, extract the MPI flags separately:
-
-```bash
-# Get MPI compile flags
-mpicxx --showme:compile   # e.g., -I/usr/include/openmpi
-
-# Get MPI link flags  
-mpicxx --showme:link      # e.g., -L/usr/lib -lmpi_cxx -lmpi
-```
-
-For GPU-aware MPI (recommended for performance), ensure your MPI is built with GPU support and the GPU transport layer (GTL) is available.
 
 ## See Also
 
 - @ref getting-started - Build and installation
-- @ref backends - Backend-specific configuration
-- @ref user-guide - API usage and examples
+- @ref backends - Backend configuration
+- @ref user-guide - API usage

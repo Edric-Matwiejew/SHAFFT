@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.25)
 project(shafft_examples LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -88,16 +88,51 @@ if(SHAFFT_EXAMPLES_STANDALONE)
   )
 endif()
 
+add_executable(example_portable_config example_portable_config.cpp)
+
+target_link_libraries(example_portable_config PRIVATE shafft::shafftc++ MPI::MPI_CXX)
+
+if(SHAFFT_EXAMPLES_STANDALONE)
+  target_link_libraries(
+    example_portable_config
+    PRIVATE PkgConfig::FFTW3 PkgConfig::FFTW3F ${FFTW_THREADS_TARGET}
+  )
+endif()
+
+add_executable(example_FFT1D example_FFT1D.cpp)
+
+target_link_libraries(example_FFT1D PRIVATE shafft::shafftc++ MPI::MPI_CXX)
+
+if(SHAFFT_EXAMPLES_STANDALONE)
+  target_link_libraries(
+    example_FFT1D
+    PRIVATE PkgConfig::FFTW3 PkgConfig::FFTW3F ${FFTW_THREADS_TARGET}
+  )
+endif()
+
 enable_language(C)
 
 find_package(MPI COMPONENTS C REQUIRED)
 
-add_executable(example_c example.c)
+add_executable(example_portable_c example_portable.c)
 
-target_link_libraries(example_c PRIVATE shafft::shafftc MPI::MPI_C m)
+target_link_libraries(example_portable_c PRIVATE shafft::shafftc MPI::MPI_C m)
 
 if(SHAFFT_EXAMPLES_STANDALONE)
-  target_link_libraries(example_c PRIVATE PkgConfig::FFTW3 PkgConfig::FFTW3F ${FFTW_THREADS_TARGET})
+  target_link_libraries(
+    example_portable_c PRIVATE PkgConfig::FFTW3 PkgConfig::FFTW3F ${FFTW_THREADS_TARGET}
+  )
+endif()
+
+add_executable(example_portable_c_config example_portable_config.c)
+
+target_link_libraries(example_portable_c_config PRIVATE shafft::shafftc MPI::MPI_C m)
+
+if(SHAFFT_EXAMPLES_STANDALONE)
+  target_link_libraries(
+    example_portable_c_config
+    PRIVATE PkgConfig::FFTW3 PkgConfig::FFTW3F ${FFTW_THREADS_TARGET}
+  )
 endif()
 
 if(SHAFFT_EXAMPLES_STANDALONE AND TARGET shafft::shafftf03)
@@ -105,6 +140,8 @@ if(SHAFFT_EXAMPLES_STANDALONE AND TARGET shafft::shafftf03)
   find_package(MPI COMPONENTS Fortran REQUIRED)
 
   add_executable(example_f03_portable example_portable.f03)
+
+  add_executable(example_f03_portable_config example_portable_config.f03)
 
   target_link_libraries(
     example_f03_portable
@@ -115,34 +152,56 @@ if(SHAFFT_EXAMPLES_STANDALONE AND TARGET shafft::shafftf03)
       PkgConfig::FFTW3F
       ${FFTW_THREADS_TARGET}
   )
+
+  target_link_libraries(
+    example_f03_portable_config
+    PRIVATE
+      shafft::shafftf03
+      MPI::MPI_Fortran
+      PkgConfig::FFTW3
+      PkgConfig::FFTW3F
+      ${FFTW_THREADS_TARGET}
+  )
 elseif(NOT SHAFFT_EXAMPLES_STANDALONE AND SHAFFT_BUILD_FORTRAN)
-  # Built as subdirectory with Fortran enabled - use real target name
   enable_language(Fortran)
   find_package(MPI COMPONENTS Fortran REQUIRED)
 
   add_executable(example_f03_portable example_portable.f03)
+  add_executable(example_f03_portable_config example_portable_config.f03)
 
-  # Disable LTO for this target (hipfort may set -flto in CMAKE_Fortran_FLAGS
-  # which can cause issues with MPI F08 symbol resolution)
   set_target_properties(example_f03_portable PROPERTIES INTERPROCEDURAL_OPTIMIZATION FALSE)
   target_compile_options(example_f03_portable PRIVATE $<$<Fortran_COMPILER_ID:GNU>:-fno-lto>)
   target_link_options(example_f03_portable PRIVATE $<$<Fortran_COMPILER_ID:GNU>:-fno-lto>)
+  set_target_properties(example_f03_portable_config PROPERTIES INTERPROCEDURAL_OPTIMIZATION FALSE)
+  target_compile_options(example_f03_portable_config PRIVATE $<$<Fortran_COMPILER_ID:GNU>:-fno-lto>)
+  target_link_options(example_f03_portable_config PRIVATE $<$<Fortran_COMPILER_ID:GNU>:-fno-lto>)
 
   target_include_directories(
     example_f03_portable
     PRIVATE
-      ${CMAKE_BINARY_DIR}/include # Location of shafft.mod
+      ${CMAKE_BINARY_DIR}/include
+  )
+  target_include_directories(
+    example_f03_portable_config
+    PRIVATE
+      ${CMAKE_BINARY_DIR}/include
   )
 
   target_link_libraries(
     example_f03_portable
     PRIVATE
-      shafftf03 # Real target name (not alias)
+      shafftf03
+      MPI::MPI_Fortran
+  )
+  target_link_libraries(
+    example_f03_portable_config
+    PRIVATE
+      shafftf03
       MPI::MPI_Fortran
   )
 
-  # Ensure .mod files are built before compiling this example
   add_dependencies(example_f03_portable shafftf03)
+  add_dependencies(example_f03_portable_config shafftf03)
 endif()
 
 option(
@@ -161,14 +220,12 @@ if(SHAFFT_BUILD_HIPFORT_EXAMPLE)
     enable_language(Fortran)
     find_package(MPI COMPONENTS Fortran REQUIRED)
 
-    # Add cmake module path for HipfortDependency
     if(SHAFFT_EXAMPLES_STANDALONE)
       list(APPEND CMAKE_MODULE_PATH "${SHAFFT_PATH}/share/cmake/Modules")
     else()
       list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
     endif()
 
-    # Use HipfortDependency module for clean hipfort detection
     include(HipfortDependency)
 
     if(TARGET hipfort::hipfort)
@@ -192,7 +249,7 @@ if(SHAFFT_BUILD_HIPFORT_EXAMPLE)
         target_include_directories(
           example_f03_hip
           PRIVATE
-            ${CMAKE_BINARY_DIR}/include # Location of shafft.mod
+            ${CMAKE_BINARY_DIR}/include
         )
         target_link_libraries(example_f03_hip PRIVATE shafftf03 MPI::MPI_Fortran)
       endif()

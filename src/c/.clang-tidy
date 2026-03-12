@@ -1,0 +1,27 @@
+Checks: >
+  -*,
+  clang-analyzer-*,
+  readability-identifier-naming,
+  llvm-header-guard
+
+CheckOptions:
+  - key: readability-identifier-naming.FunctionCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionPrefix
+    value: shafft
+
+  - key: readability-identifier-naming.VariableCase
+    value: camelBack
+  - key: readability-identifier-naming.ParameterCase
+    value: camelBack
+
+  - key: readability-identifier-naming.EnumConstantCase
+    value: UPPER_CASE
+
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.MacroDefinitionPrefix
+    value: SHAFFT_
+
+  - key: llvm-header-guard.HeaderGuardPrefix
+    value: SHAFFT_

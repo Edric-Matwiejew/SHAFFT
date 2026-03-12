@@ -9,6 +9,7 @@
 ## Features
 
 - N-dimensional distributed FFTs with slab decomposition
+- 1D distributed FFTs via dedicated FFT1D class
 - Flexible process grid topology (1 to N-1 distributed axes)
 - Single and double precision complex transforms
 - Backend-agnostic design with portable buffer API
@@ -27,7 +28,7 @@
 
 - CMake >= 3.21
 - MPI implementation
-- GCC >= 10 (or C++17-compatible compiler)
+- C++17-compatible compiler (GCC >= 10)
 - Backend: FFTW3 (CPU) or ROCm/HIP (GPU)
 
 ### Build
@@ -42,7 +43,7 @@ cmake --build build --target install
 ```
 
 ```bash
-# hipFFT backend (GPU, host-staging MPI)
+# hipFFT backend (GPU)
 cmake -B build -S . \
     -DSHAFFT_ENABLE_HIPFFT=ON \
     -DSHAFFT_GPU_AWARE_MPI=OFF \
@@ -52,28 +53,21 @@ cmake -B build -S . \
 cmake --build build --target install
 ```
 
-Config header is generated at `build/include/shafft/shafft_config.h`; there should be no `include/shafft/shafft_config.h` in the source tree.
-
-### Testing
-
-```bash
-cd build
-ctest --output-on-failure
-
-# Run specific test
-ctest -R test_roundtrip_4ranks
-```
-
 ### Example
 
 ```cpp
 #include <shafft/shafft.hpp>
+#include <mpi.h>
 
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
     
-    shafft::Plan plan;
-    plan.init(1, {64, 64, 32}, shafft::FFTType::C2C, MPI_COMM_WORLD);
+    std::vector<int> commDims = {0, 0, 0};  // auto-select
+    std::vector<size_t> dims = {64, 64, 32};
+    
+    shafft::FFTND plan;
+    plan.init(commDims, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
+    plan.plan();
     
     size_t n = plan.allocSize();
     shafft::complexf *data, *work;
@@ -82,6 +76,10 @@ int main(int argc, char** argv) {
     
     plan.setBuffers(data, work);
     plan.execute(shafft::FFTDirection::FORWARD);
+    plan.normalize();
+    
+    plan.execute(shafft::FFTDirection::BACKWARD);
+    plan.normalize();
     
     plan.release();
     shafft::freeBuffer(data);
@@ -92,14 +90,29 @@ int main(int argc, char** argv) {
 }
 ```
 
+### Validation (Optional)
+
+```bash
+cd build
+ctest --output-on-failure
+```
+
 ## Documentation
 
-For detailed documentation, see the generated Doxygen output:
+Primary documentation:
+- [Getting Started](docs/getting-started.dox) - installation and build options
+- [User Guide](docs/user-guide.dox) - API usage for C++, C, and Fortran
+- [Linking Guide](docs/linking.dox) - compile and link instructions
+- [Backend Reference](docs/backends.dox) - backend-specific configuration
+- [Limitations](docs/limitations.dox) - current constraints
+
+Build local HTML documentation (optional):
 
 ```bash
 doxygen docs/Doxyfile
-open docs/html/index.html
 ```
+
+Then open `docs/html/index.html` in your browser.
 
 ## License
 
@@ -110,7 +123,7 @@ MIT License. See [LICENSE](./LICENSE) for details.
 If you use SHAFFT in your research, please cite the underlying method:
 
 ```bibtex
-@article{dalcin2018fast,
+@article{dalcin2019fast,
   title={Fast parallel multidimensional FFT using advanced MPI},
   author={Dalcin, Lisandro and Mortensen, Mikael and Keyes, David E},
   journal={Journal of Parallel and Distributed Computing},

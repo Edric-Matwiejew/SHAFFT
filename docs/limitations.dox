@@ -1,62 +1,81 @@
 # Limitations {#limitations}
 
-SHAFFT is designed for distributed multi-dimensional FFTs. The current version has the following limitations.
+Known constraints of the current SHAFFT version.
 
 ## Dimensional Constraints
 
-### 1D Tensors
+### 1D Tensors with FFTND
 
-1D tensors (single axis) can only be processed with a single MPI rank. When using multiple ranks with a 1D tensor, `shafftPlanNDA()` and `shafftPlanCart()` (or the C++ equivalents) will return `SHAFFT_ERR_INVALID_DECOMP`.
+1D tensors cannot use `FFTND` with multiple MPI ranks. Slab decomposition requires at least one non-distributed axis.
 
-This is because slab decomposition requires at least one non-distributed axis for local computation, which is not possible with only one dimension.
+Use `FFT1D` for distributed 1D FFTs:
 
-### Cross-Axis Constraint for Multi-Distributed Tensors
-
-When distributing a tensor across multiple axes, there is a **cross-axis constraint** that limits the process grid dimensions based on the contiguous axis sizes.
-
-During the FFT computation, SHAFFT performs exchanges that redistribute data between distributed and contiguous axes. Specifically, distributed axis `j` will be exchanged with contiguous axis `j + nca` (where `nca = ndim - nda` is the number of contiguous axes). This exchange requires:
-
-```
-COMM_DIMS[j] <= dimensions[j + nca]   for all j in [0, nda)
+```cpp
+shafft::FFT1D fft;
+size_t localN, localStart;
+shafft::configuration1D(N, localN, localStart, shafft::FFTType::C2C, MPI_COMM_WORLD);
+fft.init(N, localN, localStart, shafft::FFTType::C2C, MPI_COMM_WORLD);
 ```
 
-**Example**: For a 4D tensor `[32, 32, 2, 8]` with `nda = 2` distributed axes:
+See @ref decomposition for FFT1D documentation.
+
+### Cross-Axis Constraint
+
+When distributing across multiple axes, the process grid is constrained by contiguous axis sizes.
+
+During FFT computation, distributed axis `j` exchanges with contiguous axis `j + nca` (where `nca = ndim - nda`). This requires:
+
+```
+commDims[j] <= dimensions[j + nca]   for all j in [0, nda)
+```
+
+**Example**: 4D tensor `[32, 32, 2, 8]` with `nda = 2`:
 - `nca = 2` (axes 2 and 3 are contiguous)
-- Constraint for `j=0`: `COMM_DIMS[0] <= dimensions[2] = 2`
-- Constraint for `j=1`: `COMM_DIMS[1] <= dimensions[3] = 8`
+- `commDims[0] <= dimensions[2] = 2`
+- `commDims[1] <= dimensions[3] = 8`
 
-If you request a grid like `[4, 2, 1, 1]` (4 ranks on axis 0), this violates the constraint since `COMM_DIMS[0] = 4 > dimensions[2] = 2`, and the plan creation will fail with `SHAFFT_ERR_INVALID_DECOMP`.
+Grid `[4, 2, 1, 1]` violates the constraint (4 > 2) and fails with `SHAFFT_ERR_INVALID_DECOMP`.
 
-**Recommendation**: When using `planNDA()`, the library automatically caps the grid to satisfy this constraint. When using `planCart()` with an explicit grid, ensure your grid satisfies both:
-1. `COMM_DIMS[i] <= dimensions[i]` (direct constraint)
-2. `COMM_DIMS[i] <= dimensions[i + nca]` (cross-axis constraint)
+**Recommendation**: Use `configurationND()` (with `commDims` set to zeros or a desired `nda`) to let
+the library select a valid grid, then pass the returned `commDims` to `FFTND::init()`. When using
+explicit grids, ensure both:
+1. `commDims[i] <= dimensions[i]`
+2. `commDims[i] <= dimensions[i + nca]`
+
+### N-D Size Limits
+
+N-D dimensions and process grid sizes are stored as 32-bit integers internally. The C and Fortran
+interfaces use `int` for dimensions; the C++ interface accepts `size_t` but rejects values larger
+than `INT_MAX`.
 
 ## Transform Types
 
-Currently only complex-to-complex (C2C/Z2Z) transforms are supported:
+Only complex-to-complex transforms are supported:
 
-| Precision | C Constant | C++ Type |
-|-----------|------------|----------|
+| Precision | C | C++ |
+|-----------|---|-----|
 | Single | `SHAFFT_C2C` | `shafft::FFTType::C2C` |
 | Double | `SHAFFT_Z2Z` | `shafft::FFTType::Z2Z` |
 
-Real-to-complex (R2C) and complex-to-real (C2R) transforms are not yet supported.
+Real-to-complex (R2C) and complex-to-real (C2R) are not yet supported.
 
 ## Memory Requirements
 
-SHAFFT requires two separate buffers (data and work) of equal size for out-of-place transforms and internal transpositions. The required size is returned by `allocSize()` and includes padding for efficient communication.
+Two equal-sized buffers (data and work) are required:
 
 ```cpp
-shafft::Plan plan;
-plan.init(1, {64, 64, 64}, shafft::FFTType::C2C, MPI_COMM_WORLD);
-
-size_t n = plan.allocSize();  // Elements needed per buffer
+size_t n = fft.allocSize();  // Elements per buffer
 shafft::complexf *data, *work;
 shafft::allocBuffer(n, &data);
 shafft::allocBuffer(n, &work);
 ```
 
+Buffer size may exceed tensor size due to communication padding.
+
+---
+
 ## See Also
 
-- @ref user-guide - API usage and examples
-- @ref backends - Backend-specific configuration
+- @ref user-guide - API usage
+- @ref decomposition - Decomposition options
+- @ref backends - Backend configuration
