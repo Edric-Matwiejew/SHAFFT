@@ -51,7 +51,7 @@ if(SHAFFT_ENABLE_HIPFFT)
 
 elseif(SHAFFT_ENABLE_FFTW)
   list(APPEND SHAFFTC_OBJECTS
-    ${CMAKE_CURRENT_SOURCE_DIR}/../cpp/fft/fftw_method/normalize.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../cpp/fft/fftw_method/common/normalize.cpp
   )
 
   add_library(shafftc SHARED ${SHAFFTC_OBJECTS})

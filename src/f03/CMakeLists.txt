@@ -14,7 +14,7 @@ set(SHAFFTF03_OBJECTS
 
 if(SHAFFT_ENABLE_FFTW)
   list(APPEND SHAFFTF03_OBJECTS
-    ${CMAKE_CURRENT_SOURCE_DIR}/../cpp/fft/fftw_method/normalize.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../cpp/fft/fftw_method/common/normalize.cpp
   )
 endif()
 
