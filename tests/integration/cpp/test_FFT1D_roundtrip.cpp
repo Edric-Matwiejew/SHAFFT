@@ -850,8 +850,9 @@ static bool test_non_divisible_sizes() {
     }
 
     // Verify round-trip with distributed relative norms (scaled by sqrt(log N))
-    bool size_correct =
-        test::check_rel_error(h_output, h_ref, N, MPI_COMM_WORLD, /*base_tol_rel=*/5e-4);
+    bool size_correct = test::check_rel_error(
+        h_output.data(), h_ref.data(), actual_local_n,
+        N, MPI_COMM_WORLD, /*base_tol_rel=*/5e-4);
 
     (void)shafft::freeBuffer(data);
     (void)shafft::freeBuffer(work);

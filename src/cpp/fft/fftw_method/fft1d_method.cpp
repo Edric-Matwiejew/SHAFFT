@@ -49,7 +49,8 @@ static void ensureFFTwMpiInit() {
 }
 
 int fft1dQueryLayout(
-    size_t globalN, size_t& localN, size_t& localStart, size_t& localAllocSize, MPI_Comm comm) {
+    size_t globalN, size_t& localN, size_t& localStart, size_t& localAllocSize,
+    size_t& localNTrans, size_t& localStartTrans, MPI_Comm comm) {
   ensureFFTwMpiInit();
 
   ptrdiff_t localNi, localStarti;
@@ -68,13 +69,20 @@ int fft1dQueryLayout(
 
   localN = static_cast<size_t>(localNi);
   localStart = static_cast<size_t>(localStarti);
-  // Mirror ND behavior: inactive ranks (localN == 0) report zero allocSize
+  // Mirror ND behavior: inactive ranks (localN == 0) report zero allocSize.
+  // The caller creates an active subcommunicator that excludes these ranks,
+  // and FFTW plans are created on that subcommunicator so all participating
+  // ranks call MPI collectives consistently.
   localAllocSize = (localN == 0) ? 0 : static_cast<size_t>(alloc);
+
+  localNTrans = static_cast<size_t>(localNo);
+  localStartTrans = static_cast<size_t>(localStarto);
 
   if (diagEnabled()) {
     dbgHdr(comm, "fft1dQueryLayout");
     std::cerr << "globalN=" << globalN << " localN=" << localN << " localStart=" << localStart
-              << " localAllocSize=" << localAllocSize << "\n";
+              << " localAllocSize=" << localAllocSize
+              << " localNTrans=" << localNTrans << " localStartTrans=" << localStartTrans << "\n";
   }
 
   return 0;
@@ -251,24 +259,24 @@ int fft1dExecute(FFT1DHandle& handle, void* in, void* out, FFTDirection directio
   return 0;
 }
 
-int fft1dNormalize(FFT1DHandle& handle, void* data, int normExponent) {
+int fft1dNormalize(FFT1DHandle& handle, void* data, int normExponent, size_t localCount) {
   if (!data) {
     return static_cast<int>(Status::ERR_PLAN_NOT_INIT);
   }
 
   if (diagEnabled()) {
     dbgHdr(handle.comm, "fft1dNormalize");
-    std::cerr << "globalN=" << handle.globalN << " localNTrans=" << handle.localNTrans
+    std::cerr << "globalN=" << handle.globalN << " localCount=" << localCount
               << " normExponent=" << normExponent << "\n";
   }
 
   if (handle.precision == FFTType::Z2Z) {
     double normFactor =
         1.0 / std::pow(std::sqrt(static_cast<double>(handle.globalN)), normExponent);
-    return normalizeComplexDouble(normFactor, handle.localNTrans, data);
+    return normalizeComplexDouble(normFactor, localCount, data);
   } else {
     float normFactor = 1.0f / std::pow(std::sqrt(static_cast<float>(handle.globalN)), normExponent);
-    return normalizeComplexFloat(normFactor, handle.localNTrans, data);
+    return normalizeComplexFloat(normFactor, localCount, data);
   }
 }
 

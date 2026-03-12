@@ -332,6 +332,8 @@ int fft1dQueryLayout(size_t globalN,
                      size_t& localN,
                      size_t& localStart,
                      size_t& localAllocSize,
+                     size_t& localNTrans,
+                     size_t& localStartTrans,
                      MPI_Comm comm,
                      const FFT1DConfig& config) {
   int rank, numRanks;
@@ -348,11 +350,16 @@ int fft1dQueryLayout(size_t globalN,
   // in MPI_Alltoall with L-sized buffers, even if localN == 0.
   localAllocSize = L;
 
+  // hipFFT uses symmetric layout: output distribution matches input.
+  localNTrans = localN;
+  localStartTrans = localStart;
+
   if (diagEnabled()) {
     dbgHdr(comm, "fft1dQueryLayout");
     std::cerr << "globalN=" << globalN << " path=" << pathToString(pathConfig.path)
               << " localN=" << localN << " localStart=" << localStart
-              << " localAllocSize=" << localAllocSize << "\n";
+              << " localAllocSize=" << localAllocSize
+              << " localNTrans=" << localNTrans << " localStartTrans=" << localStartTrans << "\n";
   }
 
   return SHAFFT_STATUS(SHAFFT_SUCCESS);
@@ -594,27 +601,26 @@ int fft1dExecute(FFT1DHandle& handle, void* in, void* out, FFTDirection directio
   return (rc == 0) ? SHAFFT_STATUS(SHAFFT_SUCCESS) : SHAFFT_STATUS(SHAFFT_ERR_BACKEND);
 }
 
-int fft1dNormalize(FFT1DHandle& handle, void* data, int normExponent) {
+int fft1dNormalize(FFT1DHandle& handle, void* data, int normExponent, size_t localCount) {
   if (!handle.internal)
     return SHAFFT_STATUS(SHAFFT_ERR_PLAN_NOT_INIT);
 
   FFT1dInternal* internal = static_cast<FFT1dInternal*>(handle.internal);
   const size_t nTrue = handle.globalN;
-  size_t elemCount = handle.localAllocSize;
 
   if (diagEnabled()) {
     dbgHdr(handle.comm, "fft1dNormalize");
-    std::cerr << "globalN=" << nTrue << " elemCount=" << elemCount
+    std::cerr << "globalN=" << nTrue << " localCount=" << localCount
               << " normExponent=" << normExponent << "\n";
   }
 
   int rc = 0;
   if (handle.precision == FFTType::C2C) {
     float norm = 1.0f / std::pow(std::sqrt(static_cast<float>(nTrue)), normExponent);
-    rc = normalizeComplexFloat(norm, elemCount, data, internal->stream);
+    rc = normalizeComplexFloat(norm, localCount, data, internal->stream);
   } else {
     double norm = 1.0 / std::pow(std::sqrt(static_cast<double>(nTrue)), normExponent);
-    rc = normalizeComplexDouble(norm, elemCount, data, internal->stream);
+    rc = normalizeComplexDouble(norm, localCount, data, internal->stream);
   }
 
   if (rc != 0)

@@ -458,8 +458,9 @@ static bool test_FFT1D_getaxes() {
 
 // Test: FFT1D isActive
 static bool test_FFT1D_is_active() {
-  int worldSize;
+  int worldSize, worldRank;
   MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
+  MPI_Comm_rank(MPI_COMM_WORLD, &worldRank);
 
   size_t N = 32;
   size_t localN, localStart;
@@ -476,13 +477,33 @@ static bool test_FFT1D_is_active() {
   if (rc != 0)
     return false;
 
-  // For distributed 1D FFT, ALL ranks are active because they must
-  // participate in MPI collectives (MPI_Alltoall) during execution,
-  // even if localSize() == 0 (i.e. no original user data on this rank).
-  if (!fft.isActive())
-    return false;
+  bool active = fft.isActive();
+  size_t myLocalN = fft.localSize();
 
-  return true;
+  // Accumulate pass/fail locally — never return before the collective below.
+  bool localPass = true;
+
+  // Active ranks must have non-zero localN; inactive ones must have zero.
+  if (active && myLocalN == 0)
+    localPass = false;
+  if (!active && myLocalN != 0)
+    localPass = false;
+
+  // Count active ranks across all processes.
+  int activeCount = active ? 1 : 0;
+  int totalActive = 0;
+  MPI_Allreduce(&activeCount, &totalActive, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+
+  // There must be at least one active rank.
+  if (totalActive < 1)
+    localPass = false;
+
+  // For 2+ MPI ranks there should be at least 2 active ranks
+  // (N=32 is large enough for up to ~32 ranks).
+  if (worldSize >= 2 && totalActive < 2)
+    localPass = false;
+
+  return localPass;
 }
 
 // Test: FFT1D setBuffers and getBuffers

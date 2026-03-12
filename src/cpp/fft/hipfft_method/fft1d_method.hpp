@@ -27,12 +27,14 @@ int fft1dSetStream(FFT1DHandle& handle, hipStream_t stream);
 
 int fft1dSynchronize(FFT1DHandle& handle);
 
-int fft1dNormalize(FFT1DHandle& handle, void* data, int normExponent);
+int fft1dNormalize(FFT1DHandle& handle, void* data, int normExponent, size_t localCount);
 
 int fft1dQueryLayout(size_t globalN,
                      size_t& localN,
                      size_t& localStart,
                      size_t& localAllocSize,
+                     size_t& localNTrans,
+                     size_t& localStartTrans,
                      MPI_Comm comm,
                      const FFT1DConfig& config = FFT1DConfig{});
 

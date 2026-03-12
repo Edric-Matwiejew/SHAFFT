@@ -27,7 +27,7 @@ private:
   size_t localStartTrans_ = 0;
 
   // Allocation size
-  size_t alloc_size_ = 0;
+  size_t allocSize_ = 0;
 
   // Precision
   FFTType precision_ = FFTType::C2C;
@@ -66,7 +66,7 @@ public:
     localStartInit_ = localStartInit;
     localNTrans_ = localNTrans;
     localStartTrans_ = localStartTrans;
-    alloc_size_ = localAllocSize;
+    allocSize_ = localAllocSize;
     precision_ = precision;
     currentState_ = 0;
     initialized_ = true;
@@ -84,7 +84,7 @@ public:
       size[0] = N_;
   }
 
-  size_t allocSize() const noexcept override { return alloc_size_; }
+  size_t allocSize() const noexcept override { return allocSize_; }
 
   // Current layout (depends on state)
 
@@ -167,11 +167,10 @@ public:
   // Other queries
 
   bool isActive() const noexcept override {
-    // All ranks are active in a 1D distributed FFT.  Even ranks with
-    // localN == 0 (no original data) must participate in MPI collectives
-    // (MPI_Alltoall) during the Cooley-Tukey / Bluestein algorithm, so
-    // they need valid buffers and cannot be skipped.
-    return initialized_;
+    // A rank is active when it has a non-zero allocation. Inactive ranks are
+    // excluded from the active subcommunicator and do not participate in
+    // backend execute/normalize calls.
+    return initialized_ && allocSize_ > 0;
   }
 
   FFTType precision() const noexcept override { return precision_; }

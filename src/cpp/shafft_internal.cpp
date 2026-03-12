@@ -630,7 +630,12 @@ int shafft::detail::FFT1DPlan::normalizeImpl() noexcept {
 
     // Normalize the data buffer (where result is after buffer swap)
     // Use 1/pow(sqrt(N), norm_exponent) like FFTND
-    int rc = fft1dNormalize(*handle, dataBuf, norm_exponent_);
+    // Determine the correct local count based on the current slab state:
+    // after a round-trip (state==INITIAL), use localNInit;
+    // after a forward-only (state==REDISTRIBUTED), use localNTrans.
+    size_t localCount = 0;
+    slab1d_.getSubsize(&localCount);
+    int rc = fft1dNormalize(*handle, dataBuf, norm_exponent_, localCount);
     norm_exponent_ = 0; // Reset after normalization
     return rc;
   }
@@ -649,20 +654,58 @@ int configuration1D(size_t globalN,
                     size_t* localStart,
                     size_t* localAllocSize,
                     shafft::FFTType precision,
-                    MPI_Comm comm) noexcept {
+                    MPI_Comm comm,
+                    size_t* localNTrans,
+                    size_t* localStartTrans) noexcept {
   try {
     if (!localN || !localStart || !localAllocSize)
       SHAFFT_FAIL(SHAFFT_ERR_NULLPTR);
-    (void)precision; // Backend computes uniform distribution regardless of precision
+    (void)precision; // Backend computes distribution regardless of precision
 
+    // First query on the original comm to determine per-rank layout.
     size_t ln = 0, ls = 0, as = 0;
-    int rc = fft1dQueryLayout(globalN, ln, ls, as, comm);
+    size_t lnTrans = 0, lsTrans = 0;
+    int rc = fft1dQueryLayout(globalN, ln, ls, as, lnTrans, lsTrans, comm);
     if (rc != 0)
       return rc;
 
     *localN = ln;
     *localStart = ls;
     *localAllocSize = as;
+    if (localNTrans)
+      *localNTrans = lnTrans;
+    if (localStartTrans)
+      *localStartTrans = lsTrans;
+
+    // If this rank has local elements, create a temporary active
+    // subcommunicator (excluding ranks with localN == 0) and re-query
+    // FFTW on it.  The re-query may return a different (usually larger)
+    // allocSize because the Cooley-Tukey / Bluestein redistribution
+    // depends on the number of participating ranks.
+    bool active = (ln > 0);
+    int rank = 0;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm subcomm = MPI_COMM_NULL;
+    SHAFFT_MPI_OR_FAIL(
+        MPI_Comm_split(comm, active ? 0 : MPI_UNDEFINED, rank, &subcomm));
+
+    if (subcomm != MPI_COMM_NULL) {
+      size_t subLn = 0, subLs = 0, subAs = 0;
+      size_t subLnTrans = 0, subLsTrans = 0;
+      rc = fft1dQueryLayout(globalN, subLn, subLs, subAs, subLnTrans, subLsTrans, subcomm);
+      MPI_Comm_free(&subcomm);
+      if (rc != 0)
+        return rc;
+      // Overwrite with the corrected values from the active subcommunicator.
+      *localN = subLn;
+      *localStart = subLs;
+      *localAllocSize = subAs;
+      if (localNTrans)
+        *localNTrans = subLnTrans;
+      if (localStartTrans)
+        *localStartTrans = subLsTrans;
+    }
+
     return SHAFFT_STATUS(SHAFFT_SUCCESS);
   }
   SHAFFT_CATCH_RETURN();
@@ -706,19 +749,22 @@ int fft1dConfigure(shafft::detail::FFT1DPlan* plan,
     (void)localN;
     (void)localStart;
 
-    // Query layout from backend without creating plans
+    // Query layout from backend without creating plans.
+    // This first query uses the original communicator to determine which
+    // ranks have non-zero local elements (and therefore which are active).
     size_t queryLocalN, queryLocalStart, queryAllocSize;
-    int rc = fft1dQueryLayout(globalN, queryLocalN, queryLocalStart, queryAllocSize, comm);
+    size_t queryLocalNTrans, queryLocalStartTrans;
+    int rc = fft1dQueryLayout(globalN, queryLocalN, queryLocalStart, queryAllocSize,
+                              queryLocalNTrans, queryLocalStartTrans, comm);
     if (rc != 0)
       return rc;
 
-    // Initialize Slab1D with queried layout
-    // Note: For 1D FFT, initial and redistributed layouts are the same
+    // Initialize Slab1D with queried layout (allocSize may be refined below).
     plan->slab1d_.init(globalN,
                        queryLocalN,
                        queryLocalStart,
-                       queryLocalN,     // local_n_trans same as local_n_init for 1D
-                       queryLocalStart, // local_start_trans same as local_start_init for 1D
+                       queryLocalNTrans,
+                       queryLocalStartTrans,
                        queryAllocSize,
                        precision);
 
@@ -732,6 +778,28 @@ int fft1dConfigure(shafft::detail::FFT1DPlan* plan,
     // Create the active subcommunicator (collective on plan->comm_).
     // Inactive ranks (allocSize == 0) receive MPI_COMM_NULL.
     SHAFFT_MPI_OR_FAIL(plan->initActiveComm(plan->comm_));
+
+    // Re-query layout on the active subcommunicator.  When inactive ranks
+    // are excluded, fftw_mpi_local_size_1d may return a larger allocation
+    // requirement than the original comm query (the Cooley-Tukey / Bluestein
+    // redistribution depends on the number of participating ranks).
+    // Overwrite Slab1D with the corrected values so that allocSize() reports
+    // a buffer large enough for the plans created on the subcommunicator.
+    if (plan->isActive()) {
+      size_t subLocalN, subLocalStart, subAllocSize;
+      size_t subLocalNTrans, subLocalStartTrans;
+      rc = fft1dQueryLayout(globalN, subLocalN, subLocalStart, subAllocSize,
+                            subLocalNTrans, subLocalStartTrans, plan->getComm());
+      if (rc != 0)
+        return rc;
+      plan->slab1d_.init(globalN,
+                         subLocalN,
+                         subLocalStart,
+                         subLocalNTrans,
+                         subLocalStartTrans,
+                         subAllocSize,
+                         precision);
+    }
 
     return SHAFFT_STATUS(SHAFFT_SUCCESS);
   }
@@ -747,8 +815,8 @@ int fft1dCreatePlans(shafft::detail::FFT1DPlan* plan) noexcept {
     if (plan->initialized)
       SHAFFT_FAIL(SHAFFT_ERR_INVALID_STATE); // Already planned
 
-    // Inactive rank (null-comm path): nothing to plan.
-    if (plan->comm_ == MPI_COMM_NULL) {
+    // Inactive rank: no FFTW plans needed.
+    if (!plan->isActive()) {
       plan->initialized = true;
       return SHAFFT_STATUS(SHAFFT_SUCCESS);
     }
@@ -758,7 +826,11 @@ int fft1dCreatePlans(shafft::detail::FFT1DPlan* plan) noexcept {
     void* data = nullptr;
     void* work = nullptr;
     plan->slab1d_.getBuffers(&data, &work);
-    int rc = fft1dPlan(*plan->handle, plan->globalN_, plan->precision, plan->comm_, data, work);
+    // Create FFTW plans on the active subcommunicator so that only ranks
+    // with non-zero local elements participate in MPI collectives during
+    // execute.  This mirrors the ND approach.
+    int rc = fft1dPlan(
+        *plan->handle, plan->globalN_, plan->precision, plan->getComm(), data, work);
     if (rc != 0) {
       delete plan->handle;
       plan->handle = nullptr;

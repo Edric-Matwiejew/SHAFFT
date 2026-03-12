@@ -587,10 +587,12 @@ int config1DResolve(shafft_1d_config_t* cfg) noexcept {
 
     cfg->flags &= ~SHAFFT_CONFIG_RESOLVED;
 
-    // Query layout from backend
+    // Query layout from backend (including transposed/output layout)
     size_t localN = 0, localStart = 0, localAllocSize = 0;
+    size_t localNTrans = 0, localStartTrans = 0;
     int rc = configuration1D(
-        cfg->globalSize, &localN, &localStart, &localAllocSize, mapPrecision(cfg->precision), comm);
+        cfg->globalSize, &localN, &localStart, &localAllocSize, mapPrecision(cfg->precision), comm,
+        &localNTrans, &localStartTrans);
     if (rc != 0) {
       cfg->status = rc;
       return rc;
@@ -601,10 +603,10 @@ int config1DResolve(shafft_1d_config_t* cfg) noexcept {
     cfg->initial.localStart = localStart;
     cfg->initial.hasLocalElements = (localN > 0) ? 1 : 0;
 
-    // Output layout (same as initial for 1-D slab)
-    cfg->output.localSize = localN;
-    cfg->output.localStart = localStart;
-    cfg->output.hasLocalElements = (localN > 0) ? 1 : 0;
+    // Output layout (post-forward / transposed distribution)
+    cfg->output.localSize = localNTrans;
+    cfg->output.localStart = localStartTrans;
+    cfg->output.hasLocalElements = (localNTrans > 0) ? 1 : 0;
 
     cfg->allocElements = localAllocSize;
 

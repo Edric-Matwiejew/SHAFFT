@@ -152,13 +152,17 @@ int setStream(shafft::detail::PlanBase* plan, hipStream_t stream) noexcept;
 
 // FFT1DPlan is now defined in <shafft/detail/plan_1d_data.hpp>
 
-// Query the layout for a 1D distributed FFT without creating a plan
+// Query the layout for a 1D distributed FFT without creating a plan.
+// localNTrans/localStartTrans are optional (may be nullptr) and receive
+// the post-forward (transposed/redistributed) layout when non-null.
 int configuration1D(size_t globalN,
                     size_t* localN,
                     size_t* localStart,
                     size_t* localAllocSize,
                     shafft::FFTType precision,
-                    MPI_Comm comm) noexcept;
+                    MPI_Comm comm,
+                    size_t* localNTrans = nullptr,
+                    size_t* localStartTrans = nullptr) noexcept;
 
 // Create a new 1D plan (allocates FFT1DPlan)
 int fft1dCreate(shafft::detail::FFT1DPlan** plan) noexcept;

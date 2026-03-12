@@ -102,12 +102,12 @@ bool get_valid_comm_dims(const std::vector<size_t>& dims,
 // ============================================================================
 
 /**
- * Run a forward→backward→normalize roundtrip on an FFTND plan.
+ * Run a forward->backward->normalize roundtrip on an FFTND plan.
  * Inactive ranks skip buffer operations but still participate in the
  * collective MPI_Allreduce inside check_rel_error.
  */
 template <typename ComplexT>
-static bool run_fftnd_roundtrip(const std::vector<size_t>& dims,
+static bool runFftndRoundtrip(const std::vector<size_t>& dims,
                                 shafft::FFTType type,
                                 double tol) {
   std::vector<int> commDims;
@@ -169,28 +169,34 @@ static bool run_fftnd_roundtrip(const std::vector<size_t>& dims,
 // ============================================================================
 
 static bool test_5d_c2c() {
-  return run_fftnd_roundtrip<shafft::complexf>({4, 4, 4, 4, 4}, shafft::FFTType::C2C, test::TOL_F);
+  return runFftndRoundtrip<shafft::complexf>(
+      {4, 4, 4, 4, 4}, shafft::FFTType::C2C, test::TOL_F);
 }
 
 static bool test_5d_nda2() {
-  return run_fftnd_roundtrip<shafft::complexf>({4, 4, 4, 4, 4}, shafft::FFTType::C2C, test::TOL_F);
+  return runFftndRoundtrip<shafft::complexf>(
+      {4, 4, 4, 4, 4}, shafft::FFTType::C2C, test::TOL_F);
 }
 
 static bool test_7d_c2c() {
-  return run_fftnd_roundtrip<shafft::complexf>({4, 4, 4, 2, 2, 2, 2}, shafft::FFTType::C2C, test::TOL_F);
+  return runFftndRoundtrip<shafft::complexf>(
+      {4, 4, 4, 2, 2, 2, 2}, shafft::FFTType::C2C, test::TOL_F);
 }
 
 static bool test_7d_nda3() {
-  return run_fftnd_roundtrip<shafft::complexf>({4, 4, 2, 2, 2, 2, 2}, shafft::FFTType::C2C, test::TOL_F);
+  return runFftndRoundtrip<shafft::complexf>(
+      {4, 4, 2, 2, 2, 2, 2}, shafft::FFTType::C2C, test::TOL_F);
 }
 
 static bool test_9d_c2c() {
-  return run_fftnd_roundtrip<shafft::complexf>({2, 2, 2, 2, 2, 2, 2, 2, 2}, shafft::FFTType::C2C, test::TOL_F);
+  return runFftndRoundtrip<shafft::complexf>(
+      {2, 2, 2, 2, 2, 2, 2, 2, 2}, shafft::FFTType::C2C, test::TOL_F);
 }
 
 static bool test_11d_c2c() {
   std::vector<size_t> dims(11, 2);
-  return run_fftnd_roundtrip<shafft::complexf>(dims, shafft::FFTType::C2C, test::TOL_F);
+  return runFftndRoundtrip<shafft::complexf>(
+      dims, shafft::FFTType::C2C, test::TOL_F);
 }
 
 // ============================================================================
@@ -198,11 +204,13 @@ static bool test_11d_c2c() {
 // ============================================================================
 
 static bool test_5d_z2z() {
-  return run_fftnd_roundtrip<shafft::complexd>({4, 4, 4, 4, 4}, shafft::FFTType::Z2Z, test::TOL_D);
+  return runFftndRoundtrip<shafft::complexd>(
+      {4, 4, 4, 4, 4}, shafft::FFTType::Z2Z, test::TOL_D);
 }
 
 static bool test_7d_z2z() {
-  return run_fftnd_roundtrip<shafft::complexd>({4, 4, 4, 2, 2, 2, 2}, shafft::FFTType::Z2Z, test::TOL_D);
+  return runFftndRoundtrip<shafft::complexd>(
+      {4, 4, 4, 2, 2, 2, 2}, shafft::FFTType::Z2Z, test::TOL_D);
 }
 
 // ============================================================================
@@ -210,11 +218,13 @@ static bool test_7d_z2z() {
 // ============================================================================
 
 static bool test_asymmetric_5d() {
-  return run_fftnd_roundtrip<shafft::complexf>({8, 4, 2, 4, 8}, shafft::FFTType::C2C, test::TOL_F);
+  return runFftndRoundtrip<shafft::complexf>(
+      {8, 4, 2, 4, 8}, shafft::FFTType::C2C, test::TOL_F);
 }
 
 static bool test_prime_dims_5d() {
-  return run_fftnd_roundtrip<shafft::complexf>({3, 5, 7, 3, 5}, shafft::FFTType::C2C, test::TOL_F);
+  return runFftndRoundtrip<shafft::complexf>(
+      {3, 5, 7, 3, 5}, shafft::FFTType::C2C, test::TOL_F);
 }
 
 int main(int argc, char** argv) {
