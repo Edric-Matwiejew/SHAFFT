@@ -1,8 +1,5 @@
-/** \example example_portable.cpp
- *  Backend-agnostic SHAFFT C++ example.
- *  Uses shafft::complexf and portable buffer functions so the same code
- *  works on both CPU (FFTW) and GPU (hipFFT) backends.
- */
+/// \example example_portable.cpp
+/// Backend-portable SHAFFT C++ example using FFTND.
 #include <shafft/shafft.hpp>
 
 #include <cstdio>
@@ -12,65 +9,88 @@
 int main(int argc, char** argv) {
   MPI_Init(&argc, &argv);
 
+  // MPI setup
   int rank = 0;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  const int ndim = 3;
-  std::vector<int> dims = {64, 64, 32};
+  [[maybe_unused]] int rc;
+  constexpr int ndim = 3;
+  constexpr int printCount = 4;
+  std::vector<size_t> dims = {64, 64, 32};
 
-  // Create and initialize plan
-  shafft::Plan plan;
-  plan.init(1, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
+  // Get configuration
+  std::vector<int> commDims(ndim, 0);
+  std::vector<size_t> subsize(ndim), offset(ndim);
+  int nda = 0, commSize;
+  rc = shafft::configurationND(dims,
+                               shafft::FFTType::C2C,
+                               commDims,
+                               nda,
+                               subsize,
+                               offset,
+                               commSize,
+                               shafft::DecompositionStrategy::MINIMIZE_NDA,
+                               0,
+                               MPI_COMM_WORLD);
 
-  // Get local layout
-  std::vector<int> subsize(ndim), offset(ndim);
-  (void)plan.getLayout(subsize, offset, shafft::TensorLayout::CURRENT);
+  // Create and plan FFT
+  shafft::FFTND fft;
+  rc = fft.init(commDims, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
+  rc = fft.plan();
 
-  size_t alloc_elems = plan.allocSize();
-  int local_elems = subsize[0] * subsize[1] * subsize[2];
+  size_t allocSize = fft.allocSize();
+  size_t localElems = subsize[0] * subsize[1] * subsize[2];
 
-  // Allocate portable buffers (device memory on GPU, host on CPU)
-  shafft::complexf* data = nullptr;
-  shafft::complexf* work = nullptr;
-  (void)shafft::allocBuffer(alloc_elems, &data);
-  (void)shafft::allocBuffer(alloc_elems, &work);
+  // Allocate buffers
+  shafft::complexf *data = nullptr, *work = nullptr;
+  rc = shafft::allocBuffer(allocSize, &data);
+  rc = shafft::allocBuffer(allocSize, &work);
 
-  // Initialize host data with a single global impulse at [0,0,0]
-  std::vector<shafft::complexf> host_data(alloc_elems, {0.0f, 0.0f});
-  if (rank == 0 && local_elems > 0) {
-    host_data[0] = {1.0f, 1.0f};
+  // Initialize: delta function at origin (rank 0, index 0)
+  std::vector<shafft::complexf> host(allocSize, {0.0f, 0.0f});
+  if (rank == 0 && localElems > 0)
+    host[0] = {1.0f, 0.0f};
+
+  rc = shafft::copyToBuffer(data, host.data(), allocSize);
+  rc = fft.setBuffers(data, work);
+
+  // Forward FFT
+  rc = fft.execute(shafft::FFTDirection::FORWARD);
+  rc = fft.normalize();
+
+  // Retrieve spectrum
+  shafft::complexf *curData, *curWork;
+  rc = fft.getBuffers(&curData, &curWork);
+  std::vector<shafft::complexf> spectrum(allocSize);
+  rc = shafft::copyFromBuffer(spectrum.data(), curData, allocSize);
+
+  if (rank == 0) {
+    std::printf("Spectrum[0..%d] =", printCount - 1);
+    for (int i = 0; i < printCount; ++i)
+      std::printf(" (%g,%g)", spectrum[i].real(), spectrum[i].imag());
+    std::printf("\n");
   }
 
-  // Copy to compute buffer and attach to plan
-  (void)shafft::copyToBuffer(data, host_data.data(), alloc_elems);
-  (void)plan.setBuffers(data, work);
+  // Backward FFT
+  rc = fft.execute(shafft::FFTDirection::BACKWARD);
+  rc = fft.normalize();
 
-  // Execute forward FFT and normalize
-  (void)plan.execute(shafft::FFTDirection::FORWARD);
-  (void)plan.normalize();
+  // Retrieve result
+  rc = fft.getBuffers(&curData, &curWork);
+  std::vector<shafft::complexf> result(allocSize);
+  rc = shafft::copyFromBuffer(result.data(), curData, allocSize);
 
-  // Get current buffer (may have been swapped internally)
-  shafft::complexf* cur_data = nullptr;
-  shafft::complexf* cur_work = nullptr;
-  (void)plan.getBuffers(&cur_data, &cur_work);
-
-  // Copy result back to host
-  std::vector<shafft::complexf> result(alloc_elems);
-  (void)shafft::copyFromBuffer(result.data(), cur_data, alloc_elems);
-
-  // Print a few values on rank 0
   if (rank == 0) {
-    if (local_elems >= 4) {
-      std::printf("Result[0..3] = (%g,%g) (%g,%g) (%g,%g) (%g,%g)\n", result[0].real(),
-                  result[0].imag(), result[1].real(), result[1].imag(), result[2].real(),
-                  result[2].imag(), result[3].real(), result[3].imag());
-    }
+    std::printf("Result[0..%d]   =", printCount - 1);
+    for (int i = 0; i < printCount; ++i)
+      std::printf(" (%g,%g)", result[i].real(), result[i].imag());
+    std::printf("\n");
   }
 
   // Cleanup
-  (void)shafft::freeBuffer(data);
-  (void)shafft::freeBuffer(work);
-  plan.release();
+  rc = shafft::freeBuffer(data);
+  rc = shafft::freeBuffer(work);
+  fft.release();
 
   MPI_Finalize();
   return 0;

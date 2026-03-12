@@ -1,4 +1,5 @@
-#pragma once
+#ifndef SHAFFT_CONFIG_H
+#define SHAFFT_CONFIG_H
 
 #define SHAFFT_BACKEND_HIPFFT @SHAFFT_BACKEND_HIPFFT@
 #define SHAFFT_BACKEND_FFTW @SHAFFT_BACKEND_FFTW@
@@ -16,3 +17,5 @@
 /* Helper macro for stringification */
 #define SHAFFT_STRINGIFY_IMPL(x) #x
 #define SHAFFT_STRINGIFY(x) SHAFFT_STRINGIFY_IMPL(x)
+
+#endif // SHAFFT_CONFIG_H

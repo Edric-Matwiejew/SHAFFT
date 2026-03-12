@@ -1,11 +1,13 @@
-/** @file shafft.hpp
+/**
  *  @brief C++ interface for SHAFFT.
- *  @ingroup cpp_api
+ *  @ingroup cpp_raii_api
  */
 
 #ifndef SHAFFT_CPP_H
 #define SHAFFT_CPP_H
 
+#include <shafft/detail/fft_base.hpp>
+#include <shafft/shafft.h> // C config structs
 #include <shafft/shafft_config.h>
 #include <shafft/shafft_types.hpp>
 
@@ -21,535 +23,945 @@
 #include <fftw3.h>
 #endif
 
+/// @cond INTERNAL
+// Opaque declarations for PIMPL
+namespace shafft::detail {
+class PlanBase;
+struct FFT1DPlan;
+struct FFTNDPlan;
+} // namespace shafft::detail
+/// @endcond
+
 namespace shafft {
 
-//==============================================================================
-// RAII Plan class (recommended for C++ users)
-//==============================================================================
-
 /**
- * @brief RAII wrapper for SHAFFT distributed FFT plans.
+ * @brief N-dimensional distributed FFT plan with RAII semantics.
+ * @ingroup cpp_raii_api
  *
- * The Plan class provides automatic resource management and a cleaner object-oriented
- * interface for distributed FFT operations. Resources are automatically released
- * when the Plan goes out of scope.
+ * Manages plan lifetime automatically. User owns data and work buffers.
  *
- * @note This class does NOT manage user-provided data/work buffers - those must be
- *       freed separately using freeBuffer() or user's own memory management.
- *
- * Example usage:
- * @code
- *   shafft::Plan plan;
- *   if (plan.init(1, {64, 64, 32}, shafft::FFTType::C2C, MPI_COMM_WORLD) != 0) {
- *     // handle error
- *   }
- *
- *   shafft::complexf *data, *work;
- *   shafft::allocBuffer(plan.allocSize(), &data);
- *   shafft::allocBuffer(plan.allocSize(), &work);
- *
- *   plan.setBuffers(data, work);
- *   plan.execute(shafft::FFTDirection::FORWARD);
- *   plan.normalize();
- * @endcode
+ * @note Typical usage flow:
+ * 1. Call configurationND() to compute decomposition parameters
+ * 2. Construct FFTND and call init() with the computed parameters
+ * 3. Allocate buffers using allocSize() and call setBuffers()
+ * 4. Call plan() to create backend FFT plans
+ * 5. Call execute() for forward/backward transforms
+ * 6. Call normalize() after a forward-backward pair to restore scale
  */
-class Plan {
- public:
+class FFTND : public FFT {
+public:
   /// @brief Default constructor. Creates an uninitialized plan.
-  Plan() noexcept = default;
+  FFTND() noexcept = default;
 
   /// @brief Destructor. Releases all internal resources.
-  ~Plan() noexcept;
+  ~FFTND() noexcept override;
 
   /**
-   * @brief Explicitly release all internal resources.
+   * @brief Release all internal resources.
    *
-   * Call this before MPI_Finalize() if the Plan outlives MPI, otherwise
-   * the destructor will attempt MPI operations after MPI is finalized.
-   * After calling release(), the plan is in an uninitialized state.
+   * Call before MPI_Finalize() if the plan outlives MPI.
+   * After release(), the plan is uninitialized.
    */
-  void release() noexcept;
-
-  /// @brief Move constructor.
-  Plan(Plan&& other) noexcept;
-
-  /// @brief Move assignment operator.
-  Plan& operator=(Plan&& other) noexcept;
-
-  // Non-copyable
-  Plan(const Plan&) = delete;
-  Plan& operator=(const Plan&) = delete;
-
-  //----------------------------------------------------------------------------
-  // Initialization
-  //----------------------------------------------------------------------------
+  void release() noexcept override;
 
   /**
-   * @brief Initialize plan with NDA (N Distributed Axes) decomposition.
+   * @brief Move constructor.
    *
-   * @param nda        Number of distributed axes (typically 1 or 2).
-   * @param dimensions Global tensor dimensions.
-   * @param type       FFT type (C2C for single precision, Z2Z for double).
-   * @param comm       MPI communicator.
-   * @return Status code (0 on success).
+   * Transfers ownership of backend resources from @p other.
+   * The moved-from plan becomes uninitialized.
+   *
+   * @param other Plan to move from.
    */
-  [[nodiscard]] int init(int nda, const std::vector<int>& dimensions, FFTType type,
-                         MPI_Comm comm) noexcept;
+  FFTND(FFTND&& other) noexcept;
 
   /**
-   * @brief Initialize plan with explicit Cartesian process grid.
+   * @brief Move assignment operator.
+   *
+   * Releases current resources and takes ownership from @p other.
+   * The moved-from plan becomes uninitialized.
+   *
+   * @param other Plan to move from.
+   * @return Reference to this plan.
+   */
+  FFTND& operator=(FFTND&& other) noexcept;
+
+  FFTND(const FFTND&) = delete;
+  FFTND& operator=(const FFTND&) = delete;
+
+  /**
+   * @brief Initialize plan with Cartesian process grid.
+   *
+   * Call configurationND() first to compute @p commDims.
+   * After init(), call setBuffers() then plan() before execute().
    *
    * @param commDims   Process grid dimensions.
    * @param dimensions Global tensor dimensions.
-   * @param type       FFT type.
+   * @param type       FFT precision (C2C or Z2Z).
    * @param comm       MPI communicator.
-   * @return Status code (0 on success).
+   * @param output     Forward output-layout policy.
+   * @return 0 on success, non-zero on error.
    */
-  [[nodiscard]] int initCart(const std::vector<int>& commDims, const std::vector<int>& dimensions,
-                             FFTType type, MPI_Comm comm) noexcept;
-
-  //----------------------------------------------------------------------------
-  // Buffer management
-  //----------------------------------------------------------------------------
+  [[nodiscard]] int init(const std::vector<int>& commDims,
+                         const std::vector<size_t>& dimensions,
+                         FFTType type,
+                         MPI_Comm comm,
+                         TransformLayout output = TransformLayout::REDISTRIBUTED) noexcept;
 
   /**
-   * @brief Attach data and work buffers to the plan.
-   * @return Status code (0 on success).
+   * @brief Create backend FFT plans.
+   *
+   * Must be called after init().
+   * For the FFTW backend, dummy buffers are allocated and used for planning
+   * if they are not already set.
+   *
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int plan() noexcept override;
+
+  /**
+   * @brief Attach data and work buffers.
+   * @param data Data buffer (allocSize() elements).
+   * @param work Work buffer (allocSize() elements).
+   * @return 0 on success, non-zero on error.
    */
   [[nodiscard]] int setBuffers(complexf* data, complexf* work) noexcept;
   [[nodiscard]] int setBuffers(complexd* data, complexd* work) noexcept;
 
   /**
-   * @brief Retrieve current data and work buffer pointers.
+   * @brief Retrieve current buffer pointers.
    *
-   * After execute(), buffers may be swapped internally.
-   * @return Status code (0 on success).
+   * Buffers may be swapped after execute(); always call this to locate output.
+   *
+   * @param[out] data Current data buffer.
+   * @param[out] work Current work buffer.
+   * @return 0 on success, non-zero on error.
    */
   [[nodiscard]] int getBuffers(complexf** data, complexf** work) noexcept;
   [[nodiscard]] int getBuffers(complexd** data, complexd** work) noexcept;
 
 #if SHAFFT_BACKEND_HIPFFT
+  /**
+   * @brief Attach HIP buffers (single precision).
+   * @param data Device data buffer (allocSize() elements).
+   * @param work Device work buffer (allocSize() elements).
+   * @return 0 on success, non-zero on error.
+   */
   [[nodiscard]] int setBuffers(hipFloatComplex* data, hipFloatComplex* work) noexcept;
+
+  /**
+   * @brief Attach HIP buffers (double precision).
+   * @param data Device data buffer (allocSize() elements).
+   * @param work Device work buffer (allocSize() elements).
+   * @return 0 on success, non-zero on error.
+   */
   [[nodiscard]] int setBuffers(hipDoubleComplex* data, hipDoubleComplex* work) noexcept;
+
+  /**
+   * @brief Retrieve current HIP buffers (single precision).
+   * @param[out] data Current device data buffer.
+   * @param[out] work Current device work buffer.
+   * @return 0 on success, non-zero on error.
+   */
   [[nodiscard]] int getBuffers(hipFloatComplex** data, hipFloatComplex** work) noexcept;
+
+  /**
+   * @brief Retrieve current HIP buffers (double precision).
+   * @param[out] data Current device data buffer.
+   * @param[out] work Current device work buffer.
+   * @return 0 on success, non-zero on error.
+   */
   [[nodiscard]] int getBuffers(hipDoubleComplex** data, hipDoubleComplex** work) noexcept;
-  [[nodiscard]] int setStream(hipStream_t stream) noexcept;
 #endif
 #if SHAFFT_BACKEND_FFTW
+  /**
+   * @brief Attach FFTW buffers (double precision).
+   * @param data Host data buffer (allocSize() elements).
+   * @param work Host work buffer (allocSize() elements).
+   * @return 0 on success, non-zero on error.
+   */
   [[nodiscard]] int setBuffers(fftw_complex* data, fftw_complex* work) noexcept;
+
+  /**
+   * @brief Attach FFTW buffers (single precision).
+   * @param data Host data buffer (allocSize() elements).
+   * @param work Host work buffer (allocSize() elements).
+   * @return 0 on success, non-zero on error.
+   */
   [[nodiscard]] int setBuffers(fftwf_complex* data, fftwf_complex* work) noexcept;
+
+  /**
+   * @brief Retrieve current FFTW buffers (double precision).
+   * @param[out] data Current host data buffer.
+   * @param[out] work Current host work buffer.
+   * @return 0 on success, non-zero on error.
+   */
   [[nodiscard]] int getBuffers(fftw_complex** data, fftw_complex** work) noexcept;
+
+  /**
+   * @brief Retrieve current FFTW buffers (single precision).
+   * @param[out] data Current host data buffer.
+   * @param[out] work Current host work buffer.
+   * @return 0 on success, non-zero on error.
+   */
   [[nodiscard]] int getBuffers(fftwf_complex** data, fftwf_complex** work) noexcept;
 #endif
-
-  //----------------------------------------------------------------------------
-  // Execution
-  //----------------------------------------------------------------------------
 
   /**
    * @brief Execute the FFT.
    * @param direction FORWARD or BACKWARD.
    * @return Status code (0 on success).
    */
-  [[nodiscard]] int execute(FFTDirection direction) noexcept;
+  [[nodiscard]] int execute(FFTDirection direction) noexcept override;
 
   /**
-   * @brief Apply normalization to the transformed data.
+   * @brief Apply symmetric normalization (1/sqrt(N) per transform).
    *
-   * Normalizes by `1/sqrt(N)` for each FFT that was executed, where N is the
-   * total tensor size. After a forward-backward pair, calling `normalize()`
-   * returns data to its original scale.
+   * After a forward-backward pair, calling normalize() restores original scale.
    *
-   * @return Status code (0 on success).
+   * @return 0 on success, non-zero on error.
    */
-  [[nodiscard]] int normalize() noexcept;
-
-  //----------------------------------------------------------------------------
-  // Queries
-  //----------------------------------------------------------------------------
+  [[nodiscard]] int normalize() noexcept override;
 
   /**
-   * @brief Get the required buffer allocation size (in elements).
-   * @return Number of elements needed for data/work buffers.
+   * @brief Get required buffer size in complex elements.
    */
-  [[nodiscard]] size_t allocSize() const noexcept;
+  [[nodiscard]] size_t allocSize() const noexcept override;
 
   /**
-   * @brief Query the local tensor layout.
-   * @param[out] subsize Local dimensions per axis.
+   * @brief Get total global tensor size (product of dimensions).
+   */
+  [[nodiscard]] size_t globalSize() const noexcept override;
+
+  /**
+   * @brief Get number of dimensions.
+   */
+  [[nodiscard]] int ndim() const noexcept override;
+
+  /**
+   * @brief Get FFT precision (C2C or Z2Z).
+   */
+  [[nodiscard]] FFTType fftType() const noexcept override;
+
+  /**
+   * @brief Query local tensor layout.
+   * @param[out] subsize Local extent per axis.
    * @param[out] offset  Global offset per axis.
-   * @param layout Which layout to query (CURRENT, INITIAL, or TRANSFORMED).
-   * @return Status code (0 on success).
+   * @param layout       CURRENT, INITIAL, or REDISTRIBUTED.
+   * @return 0 on success, non-zero on error.
    */
-  [[nodiscard]] int getLayout(std::vector<int>& subsize, std::vector<int>& offset,
+  [[nodiscard]] int getLayout(std::vector<size_t>& subsize,
+                              std::vector<size_t>& offset,
                               TensorLayout layout = TensorLayout::CURRENT) const noexcept;
 
   /**
-   * @brief Query the local tensor axes distribution.
+   * @brief Query axis distribution.
    * @param[out] ca Contiguous (non-distributed) axes.
    * @param[out] da Distributed axes.
-   * @param layout Which layout to query.
-   * @return Status code (0 on success).
+   * @param layout  CURRENT, INITIAL, or REDISTRIBUTED.
+   * @return 0 on success, non-zero on error.
    */
-  [[nodiscard]] int getAxes(std::vector<int>& ca, std::vector<int>& da,
+  [[nodiscard]] int getAxes(std::vector<int>& ca,
+                            std::vector<int>& da,
                             TensorLayout layout = TensorLayout::CURRENT) const noexcept;
 
-  /// @brief Check if the plan has been initialized.
-  [[nodiscard]] bool isInitialized() const noexcept { return data_ != nullptr; }
-
-  /// @brief Check if the plan is valid (alias for isInitialized).
-  explicit operator bool() const noexcept { return isInitialized(); }
+  /**
+   * @brief Check if this rank participates in computation.
+   *
+   * Inactive ranks have no local data; execute() and normalize() are no-ops.
+   */
+  [[nodiscard]] bool isActive() const noexcept override;
 
   /**
-   * @brief Check if this rank is active (has work to do).
-   *
-   * Inactive ranks do not participate in the FFT computation. This can occur
-   * when the tensor size or decomposition does not evenly divide across all
-   * MPI ranks. Inactive ranks can still call execute() and normalize() safely;
-   * these become no-ops.
-   *
-   * @return true if this rank participates in the FFT, false if excluded.
+   * @brief Attach buffers (type-erased).
+   * @param data Data buffer.
+   * @param work Work buffer.
+   * @return 0 on success, non-zero on error.
    */
-  [[nodiscard]] bool isActive() const noexcept;
+  [[nodiscard]] int setBuffersRaw(void* data, void* work) noexcept override;
 
-  /// @brief Get the underlying PlanData pointer (for advanced use/interop).
-  [[nodiscard]] PlanData* data() noexcept { return data_; }
-  [[nodiscard]] const PlanData* data() const noexcept { return data_; }
+  /**
+   * @brief Retrieve current buffer pointers (type-erased).
+   * @param[out] data Current data buffer.
+   * @param[out] work Current work buffer.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int getBuffersRaw(void** data, void** work) noexcept override;
 
- private:
-  PlanData* data_ = nullptr;
-};
+#if SHAFFT_BACKEND_HIPFFT
+  /**
+   * @brief Set HIP stream for subsequent operations.
+   * @param stream HIP stream handle to use for execution.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int setStream(hipStream_t stream) noexcept override;
+#endif
 
-//==============================================================================
-// Free functions (C-style API for backward compatibility and C interop)
-//==============================================================================
+  /**
+   * @brief Get a duplicated communicator from this plan.
+   *
+   * Returns MPI_COMM_NULL for inactive ranks. The caller must
+   * call MPI_Comm_free() on the returned communicator when done.
+   * Valid only after plan() succeeds.
+   *
+   * @param[out] outComm Receives duplicated communicator.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int getCommunicator(MPI_Comm* outComm) const noexcept;
+
+  /**
+   * @brief Initialize plan from a resolved config object.
+   *
+   * Auto-resolves if SHAFFT_CONFIG_RESOLVED is not set.
+   * Communicator is read from the config struct (worldComm).
+   *
+   * @param cfg    Config struct (resolved or will be auto-resolved).
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int init(shafft_nd_config_t& cfg) noexcept;
+
+private:
+  detail::FFTNDPlan* data_ = nullptr;
+}; // class FFTND
+
+/**
+ * @brief 1-dimensional distributed FFT plan with RAII semantics.
+ * @ingroup cpp_raii_api
+ *
+ * Uses block distribution: rank r owns [localStart, localStart + localN).
+ * allocSize() may exceed localN due to padding.
+ *
+ * @note Typical usage flow:
+ * 1. Call configuration1D() to compute local layout
+ * 2. Construct FFT1D and call init() with the computed parameters
+ * 3. Allocate buffers using allocSize() and call setBuffers()
+ * 4. Call plan() to create backend FFT plans
+ * 5. Call execute() for forward/backward transforms
+ * 6. Call normalize() after a forward-backward pair to restore scale
+ */
+class FFT1D : public FFT {
+public:
+  /// @brief Default constructor (uninitialized).
+  FFT1D() noexcept = default;
+
+  /// @brief Destructor.
+  ~FFT1D() noexcept override;
+
+  /**
+   * @brief Release all internal resources.
+   *
+   * Call before MPI_Finalize() if the plan outlives MPI.
+   */
+  void release() noexcept override;
+
+  /**
+   * @brief Move constructor.
+   *
+   * Transfers ownership of backend resources from @p other.
+   * The moved-from plan becomes uninitialized.
+   *
+   * @param other Plan to move from.
+   */
+  FFT1D(FFT1D&& other) noexcept;
+
+  /**
+   * @brief Move assignment operator.
+   *
+   * Releases current resources and takes ownership from @p other.
+   * The moved-from plan becomes uninitialized.
+   *
+   * @param other Plan to move from.
+   * @return Reference to this plan.
+   */
+  FFT1D& operator=(FFT1D&& other) noexcept;
+
+  // Non-copyable
+  FFT1D(const FFT1D&) = delete;
+  FFT1D& operator=(const FFT1D&) = delete;
+
+  /**
+   * @brief Initialize plan.
+   *
+   * Call configuration1D() first to compute layout parameters.
+   *
+   * @param globalN    Global FFT size.
+   * @param localN     Local element count for this rank.
+   * @param localStart This rank's offset in global array.
+   * @param precision  FFT precision (C2C or Z2Z).
+   * @param comm       MPI communicator.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int
+  init(size_t globalN, size_t localN, size_t localStart, FFTType precision, MPI_Comm comm) noexcept;
+
+  /**
+   * @brief Create backend FFT plans.
+   *
+   * Must be called after init().
+   * For FFTW, buffers may be set later; dummy buffers are used for planning.
+   * Calling plan() more than once is an error.
+   *
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int plan() noexcept override;
+
+  /**
+   * @brief Attach data and work buffers.
+   *
+   * Buffers must be allocated and have at least allocSize() elements.
+   *
+   * @param data Input buffer (allocSize() elements).
+   * @param work Output buffer (allocSize() elements).
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int setBuffers(complexf* data, complexf* work) noexcept;
+  [[nodiscard]] int setBuffers(complexd* data, complexd* work) noexcept;
+
+  /**
+   * @brief Retrieve current buffer pointers.
+   * @param[out] data Current data buffer.
+   * @param[out] work Current work buffer.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int getBuffers(complexf** data, complexf** work) noexcept;
+
+  /**
+   * @brief Retrieve current buffer pointers (double precision).
+   * @param[out] data Current data buffer.
+   * @param[out] work Current work buffer.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int getBuffers(complexd** data, complexd** work) noexcept;
+
+#if SHAFFT_BACKEND_HIPFFT
+  /**
+   * @brief Attach HIP buffers (single precision).
+   * @param data Device data buffer (allocSize() elements).
+   * @param work Device work buffer (allocSize() elements).
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int setBuffers(hipFloatComplex* data, hipFloatComplex* work) noexcept;
+
+  /**
+   * @brief Attach HIP buffers (double precision).
+   * @param data Device data buffer (allocSize() elements).
+   * @param work Device work buffer (allocSize() elements).
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int setBuffers(hipDoubleComplex* data, hipDoubleComplex* work) noexcept;
+
+  /**
+   * @brief Retrieve current HIP buffers (single precision).
+   * @param[out] data Current device data buffer.
+   * @param[out] work Current device work buffer.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int getBuffers(hipFloatComplex** data, hipFloatComplex** work) noexcept;
+
+  /**
+   * @brief Retrieve current HIP buffers (double precision).
+   * @param[out] data Current device data buffer.
+   * @param[out] work Current device work buffer.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int getBuffers(hipDoubleComplex** data, hipDoubleComplex** work) noexcept;
+#endif
+#if SHAFFT_BACKEND_FFTW
+  /**
+   * @brief Attach FFTW buffers (double precision).
+   * @param data Host data buffer (allocSize() elements).
+   * @param work Host work buffer (allocSize() elements).
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int setBuffers(fftw_complex* data, fftw_complex* work) noexcept;
+
+  /**
+   * @brief Attach FFTW buffers (single precision).
+   * @param data Host data buffer (allocSize() elements).
+   * @param work Host work buffer (allocSize() elements).
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int setBuffers(fftwf_complex* data, fftwf_complex* work) noexcept;
+
+  /**
+   * @brief Retrieve current FFTW buffers (double precision).
+   * @param[out] data Current host data buffer.
+   * @param[out] work Current host work buffer.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int getBuffers(fftw_complex** data, fftw_complex** work) noexcept;
+
+  /**
+   * @brief Retrieve current FFTW buffers (single precision).
+   * @param[out] data Current host data buffer.
+   * @param[out] work Current host work buffer.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int getBuffers(fftwf_complex** data, fftwf_complex** work) noexcept;
+#endif
+
+  /**
+   * @brief Execute the transform.
+   * @param direction FORWARD or BACKWARD.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int execute(FFTDirection direction) noexcept override;
+
+  /**
+   * @brief Apply symmetric normalization (1/sqrt(N) per transform).
+   *
+   * After a forward-backward pair, calling normalize() restores original scale.
+   *
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int normalize() noexcept override;
+
+  /**
+   * @brief Get global shape as length-1 vector.
+   */
+  [[nodiscard]] std::vector<size_t> globalShape() const noexcept;
+
+  /**
+   * @brief Get global FFT size.
+   */
+  [[nodiscard]] size_t globalSize() const noexcept override;
+
+  /**
+   * @brief Get number of dimensions (always 1).
+   */
+  [[nodiscard]] int ndim() const noexcept override;
+
+  /**
+   * @brief Get FFT precision (C2C or Z2Z).
+   */
+  [[nodiscard]] FFTType fftType() const noexcept override;
+
+  /**
+   * @brief Get local element count (before padding).
+   */
+  [[nodiscard]] size_t localSize() const noexcept;
+
+  /**
+   * @brief Get required buffer size in complex elements.
+   *
+   * May exceed localSize() due to padding.
+   */
+  [[nodiscard]] size_t allocSize() const noexcept override;
+
+  /**
+   * @brief Query local layout.
+   * @param[out] localShape Local size as length-1 vector.
+   * @param[out] offset     Local offset as length-1 vector.
+   * @param layout          CURRENT, INITIAL, or REDISTRIBUTED.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int getLayout(std::vector<size_t>& localShape,
+                              std::vector<size_t>& offset,
+                              TensorLayout layout = TensorLayout::CURRENT) const noexcept;
+
+  /**
+   * @brief Query axis distribution.
+   *
+   * Returns ca={} and da={0} (the single axis is distributed).
+   *
+   * @param[out] ca Contiguous axes (empty).
+   * @param[out] da Distributed axes ({0}).
+   * @param layout  CURRENT, INITIAL, or REDISTRIBUTED.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int getAxes(std::vector<int>& ca,
+                            std::vector<int>& da,
+                            TensorLayout layout = TensorLayout::CURRENT) const noexcept;
+
+  /// @brief Check if this rank participates in computation.
+  [[nodiscard]] bool isActive() const noexcept override;
+
+  /**
+   * @brief Attach buffers (type-erased).
+   * @param data Data buffer.
+   * @param work Work buffer.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int setBuffersRaw(void* data, void* work) noexcept override;
+
+  /**
+   * @brief Retrieve current buffer pointers (type-erased).
+   * @param[out] data Current data buffer.
+   * @param[out] work Current work buffer.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int getBuffersRaw(void** data, void** work) noexcept override;
+
+#if SHAFFT_BACKEND_HIPFFT
+  /**
+   * @brief Set HIP stream for subsequent operations.
+   * @param stream HIP stream handle to use for execution.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int setStream(hipStream_t stream) noexcept override;
+#endif
+
+  /**
+   * @brief Get a duplicated communicator from this plan.
+   *
+   * Returns MPI_COMM_NULL for inactive ranks. The caller must
+   * call MPI_Comm_free() on the returned communicator when done.
+   *
+   * @param[out] outComm Receives duplicated communicator.
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int getCommunicator(MPI_Comm* outComm) const noexcept;
+
+  /**
+   * @brief Initialize plan from a resolved 1-D config object.
+   *
+   * Auto-resolves if SHAFFT_CONFIG_RESOLVED is not set.
+   * Communicator is read from the config struct (worldComm).
+   *
+   * @param cfg  Config struct (resolved or will be auto-resolved).
+   * @return 0 on success, non-zero on error.
+   */
+  [[nodiscard]] int init(shafft_1d_config_t& cfg) noexcept;
+
+private:
+  detail::FFT1DPlan* data_ = nullptr;
+}; // class FFT1D
 
 #if SHAFFT_BACKEND_HIPFFT
 /**
- * @brief Set the HIP stream for a SHAFFT plan.
- * @ingroup cpp_api
- *
- * @param plan   Plan handle (initialized).
- * @param stream HIP stream to set.
- * @return Status code (0 on success, non-zero on failure).
+ * @brief Set HIP stream for GPU operations.
+ * @ingroup cpp_lowlevel_api
+ * @param plan   Plan handle.
+ * @param stream HIP stream.
+ * @return 0 on success, non-zero on error.
  */
-int setStream(PlanData* plan, hipStream_t stream);
+int setStream(detail::PlanBase* plan, hipStream_t stream);
 
-/// @brief Retrieve buffers (hipFloatComplex overload).
-/// @ingroup cpp_api
-int getBuffers(PlanData* plan, hipFloatComplex** data, hipFloatComplex** work) noexcept;
-/// @brief Retrieve buffers (hipDoubleComplex overload).
-/// @ingroup cpp_api
-int getBuffers(PlanData* plan, hipDoubleComplex** data, hipDoubleComplex** work) noexcept;
-/// @brief Set buffers (hipFloatComplex overload).
-/// @ingroup cpp_api
-int setBuffers(PlanData* plan, hipFloatComplex* data, hipFloatComplex* work) noexcept;
-/// @brief Set buffers (hipDoubleComplex overload).
-/// @ingroup cpp_api
-int setBuffers(PlanData* plan, hipDoubleComplex* data, hipDoubleComplex* work) noexcept;
+/**
+ * @brief Retrieve HIP buffers (single precision).
+ * @ingroup cpp_lowlevel_api
+ * @param plan       Plan handle.
+ * @param[out] data  Current device data buffer.
+ * @param[out] work  Current device work buffer.
+ * @return 0 on success, non-zero on error.
+ */
+int getBuffers(detail::PlanBase* plan, hipFloatComplex** data, hipFloatComplex** work) noexcept;
+
+/**
+ * @brief Retrieve HIP buffers (double precision).
+ * @ingroup cpp_lowlevel_api
+ * @param plan       Plan handle.
+ * @param[out] data  Current device data buffer.
+ * @param[out] work  Current device work buffer.
+ * @return 0 on success, non-zero on error.
+ */
+int getBuffers(detail::PlanBase* plan, hipDoubleComplex** data, hipDoubleComplex** work) noexcept;
+
+/**
+ * @brief Set HIP buffers (single precision).
+ * @ingroup cpp_lowlevel_api
+ * @param plan  Plan handle.
+ * @param data  Device data buffer (allocSize() elements).
+ * @param work  Device work buffer (allocSize() elements).
+ * @return 0 on success, non-zero on error.
+ */
+int setBuffers(detail::PlanBase* plan, hipFloatComplex* data, hipFloatComplex* work) noexcept;
+
+/**
+ * @brief Set HIP buffers (double precision).
+ * @ingroup cpp_lowlevel_api
+ * @param plan  Plan handle.
+ * @param data  Device data buffer (allocSize() elements).
+ * @param work  Device work buffer (allocSize() elements).
+ * @return 0 on success, non-zero on error.
+ */
+int setBuffers(detail::PlanBase* plan, hipDoubleComplex* data, hipDoubleComplex* work) noexcept;
 #endif
 #if SHAFFT_BACKEND_FFTW
-/// @brief Retrieve buffers (fftw_complex overload).
-/// @ingroup cpp_api
-int getBuffers(PlanData* plan, fftw_complex** data, fftw_complex** work) noexcept;
-/// @brief Retrieve buffers (fftwf_complex overload).
-/// @ingroup cpp_api
-int getBuffers(PlanData* plan, fftwf_complex** data, fftwf_complex** work) noexcept;
-/// @brief Set buffers (fftw_complex overload).
-/// @ingroup cpp_api
-int setBuffers(PlanData* plan, fftw_complex* data, fftw_complex* work) noexcept;
-/// @brief Set buffers (fftwf_complex overload).
-/// @ingroup cpp_api
-int setBuffers(PlanData* plan, fftwf_complex* data, fftwf_complex* work) noexcept;
+/**
+ * @brief Retrieve FFTW buffers (double precision).
+ * @ingroup cpp_lowlevel_api
+ * @param plan       Plan handle.
+ * @param[out] data  Current host data buffer.
+ * @param[out] work  Current host work buffer.
+ * @return 0 on success, non-zero on error.
+ */
+int getBuffers(detail::PlanBase* plan, fftw_complex** data, fftw_complex** work) noexcept;
+
+/**
+ * @brief Retrieve FFTW buffers (single precision).
+ * @ingroup cpp_lowlevel_api
+ * @param plan       Plan handle.
+ * @param[out] data  Current host data buffer.
+ * @param[out] work  Current host work buffer.
+ * @return 0 on success, non-zero on error.
+ */
+int getBuffers(detail::PlanBase* plan, fftwf_complex** data, fftwf_complex** work) noexcept;
+
+/**
+ * @brief Set FFTW buffers (double precision).
+ * @ingroup cpp_lowlevel_api
+ * @param plan  Plan handle.
+ * @param data  Host data buffer (allocSize() elements).
+ * @param work  Host work buffer (allocSize() elements).
+ * @return 0 on success, non-zero on error.
+ */
+int setBuffers(detail::PlanBase* plan, fftw_complex* data, fftw_complex* work) noexcept;
+
+/**
+ * @brief Set FFTW buffers (single precision).
+ * @ingroup cpp_lowlevel_api
+ * @param plan  Plan handle.
+ * @param data  Host data buffer (allocSize() elements).
+ * @param work  Host work buffer (allocSize() elements).
+ * @return 0 on success, non-zero on error.
+ */
+int setBuffers(detail::PlanBase* plan, fftwf_complex* data, fftwf_complex* work) noexcept;
 #endif
 
-//------------------------------------------------------------------------------
-// Backend-agnostic buffer functions (portable across CPU and GPU)
-//------------------------------------------------------------------------------
-
 /**
- * @brief Attach data and work buffers using portable complex types.
- * @ingroup cpp_api
+ * @brief Attach buffers using portable complex types.
+ * @ingroup cpp_lowlevel_api
  *
- * Works identically on CPU (FFTW) and GPU (HIPFFT) backends.
- * On GPU backends, buffers must reside in device memory.
- * On CPU backends, buffers must reside in host memory.
+ * GPU backends require device memory; CPU backends require host memory.
  *
- * @param plan Plan handle (initialized).
- * @param data Data buffer pointer.
- * @param work Work/scratch buffer pointer.
- * @return Status code (0 on success, non-zero on failure).
+ * @param plan Plan handle.
+ * @param data Data buffer.
+ * @param work Work buffer.
+ * @return 0 on success, non-zero on error.
  */
-int setBuffers(PlanData* plan, complexf* data, complexf* work) noexcept;
-int setBuffers(PlanData* plan, complexd* data, complexd* work) noexcept;
+int setBuffers(detail::PlanBase* plan, complexf* data, complexf* work) noexcept;
+int setBuffers(detail::PlanBase* plan, complexd* data, complexd* work) noexcept;
 
 /**
- * @brief Retrieve the current data and work buffer pointers.
- * @ingroup cpp_api
+ * @brief Retrieve current buffer pointers.
+ * @ingroup cpp_lowlevel_api
  *
- * After execute(), buffers may be swapped; use this to obtain
- * the pointer that currently holds the transformed data.
+ * Buffers may be swapped after execute().
  *
- * @param plan Plan handle (initialized).
- * @param data [out] Receives current data buffer pointer.
- * @param work [out] Receives current work buffer pointer.
- * @return Status code (0 on success, non-zero on failure).
+ * @param plan        Plan handle.
+ * @param[out] data   Current data buffer.
+ * @param[out] work   Current work buffer.
+ * @return 0 on success, non-zero on error.
  */
-int getBuffers(PlanData* plan, complexf** data, complexf** work) noexcept;
-int getBuffers(PlanData* plan, complexd** data, complexd** work) noexcept;
-
-//------------------------------------------------------------------------------
-// Portable memory allocation helpers
-//------------------------------------------------------------------------------
+int getBuffers(detail::PlanBase* plan, complexf** data, complexf** work) noexcept;
+int getBuffers(detail::PlanBase* plan, complexd** data, complexd** work) noexcept;
 
 /**
- * @brief Allocate a buffer suitable for the current backend.
- * @ingroup cpp_api
+ * @brief Allocate buffer for the current backend.
+ * @ingroup cpp_raii_api
+ * @ingroup cpp_lowlevel_api
  *
- * Allocates device memory on GPU backends (hipMalloc), host memory on CPU backends.
- * Use freeBuffer() to release.
+ * Uses hipMalloc on GPU, standard allocation on CPU.
  *
- * @param count Number of elements to allocate.
- * @param buf   [out] Receives the allocated buffer pointer.
- * @return Status code (0 on success, non-zero on failure).
+ * @param count       Number of complex elements.
+ * @param[out] buf    Allocated buffer.
+ * @return 0 on success, non-zero on error.
  */
 int allocBuffer(size_t count, complexf** buf) noexcept;
 int allocBuffer(size_t count, complexd** buf) noexcept;
 
 /**
- * @brief Free a buffer allocated with allocBuffer().
- * @ingroup cpp_api
- *
- * @param buf Buffer to free (may be nullptr).
- * @return Status code (0 on success, non-zero on failure).
+ * @brief Free buffer allocated with allocBuffer().
+ * @ingroup cpp_raii_api
+ * @ingroup cpp_lowlevel_api
+ * @param buf Buffer to free (nullptr safe).
+ * @return 0 on success, non-zero on error.
  */
 int freeBuffer(complexf* buf) noexcept;
 int freeBuffer(complexd* buf) noexcept;
 
-//------------------------------------------------------------------------------
-// Portable memory copy helpers
-//------------------------------------------------------------------------------
-
 /**
- * @brief Copy data from host memory to a SHAFFT buffer.
- * @ingroup cpp_api
+ * @brief Copy from host to SHAFFT buffer.
+ * @ingroup cpp_raii_api
+ * @ingroup cpp_lowlevel_api
  *
- * On GPU backends, performs hipMemcpy (host-to-device).
- * On CPU backends, performs std::memcpy.
+ * Performs copy to a backend buffer.
  *
- * @param dst   Destination buffer (allocated via allocBuffer or user-managed).
+ * @param dst   Destination buffer.
  * @param src   Source host memory.
- * @param count Number of elements to copy.
- * @return Status code (0 on success, non-zero on failure).
+ * @param count Number of complex elements.
+ * @return 0 on success, non-zero on error.
  */
 int copyToBuffer(complexf* dst, const complexf* src, size_t count) noexcept;
 int copyToBuffer(complexd* dst, const complexd* src, size_t count) noexcept;
 
 /**
- * @brief Copy data from a SHAFFT buffer to host memory.
- * @ingroup cpp_api
+ * @brief Copy from SHAFFT buffer to host.
+ * @ingroup cpp_raii_api
+ * @ingroup cpp_lowlevel_api
  *
- * On GPU backends, performs hipMemcpy (device-to-host).
- * On CPU backends, performs std::memcpy.
+ * Performs copy from a backend buffer to host memory.
  *
  * @param dst   Destination host memory.
  * @param src   Source buffer.
- * @param count Number of elements to copy.
- * @return Status code (0 on success, non-zero on failure).
+ * @param count Number of complex elements.
+ * @return 0 on success, non-zero on error.
  */
 int copyFromBuffer(complexf* dst, const complexf* src, size_t count) noexcept;
 int copyFromBuffer(complexd* dst, const complexd* src, size_t count) noexcept;
 
 /**
- * @brief Create a new SHAFFT plan (C-style API).
- * @ingroup cpp_api
+ * @brief Allocate N-D plan object (C-style API).
+ * @ingroup cpp_lowlevel_api
  *
- * Allocates (with nothrow) a plan object. Destroy with destroy().
- * @note Prefer using the RAII shafft::Plan class for automatic resource management.
+ * Prefer the RAII FFTND class. Release with destroy().
  *
- * @param out  [out] Receives the newly created plan pointer.
- * @return Status code (0 on success, non-zero on failure).
- *         On allocation failure returns SHAFFT_ERR_ALLOC and sets out to nullptr.
+ * @param[out] out Plan pointer.
+ * @return 0 on success, non-zero on error.
  */
-int planCreate(PlanData** out);
+int planNDCreate(detail::FFTNDPlan** out);
 
 /**
- * @brief Compute an NDA (prefix) slab decomposition with a desired number of distributed axes.
- * @ingroup cpp_api
+ * @brief Allocate 1-D plan object (C-style API).
+ * @ingroup cpp_lowlevel_api
  *
- * This function determines the optimal Cartesian process grid and local tensor
- * block for each MPI rank based on the global tensor size, desired decomposition,
- * and optional memory constraints.
+ * Prefer the RAII FFT1D class. Release with destroy().
  *
- * @par Auto-selection mode (nda == 0 on input):
- * When @p nda is 0, the planner automatically selects the number of distributed
- * axes. The `mem_limit` parameter controls the selection strategy:
- * - `mem_limit > 0`: Maximize nda subject to per-rank memory staying under limit
- * - `mem_limit == 0`: Maximize nda (no memory constraint)
- * - `mem_limit < 0` (signed interpretation): Minimize nda (fewest distributed axes)
- *
- * @par Manual mode (nda > 0 on input):
- * When @p nda is positive, that exact value is used. The function fails if the
- * requested decomposition cannot be satisfied.
- *
- * @par Process grid computation:
- * The Cartesian process grid `COMM_DIMS` is computed automatically based on the
- * number of MPI ranks and tensor dimensions. The grid follows a "slab prefix"
- * structure: the first `nda` entries may be > 1, and all trailing entries are 1.
- * For example, with 8 ranks on a 64×64×32 tensor, COMM_DIMS might be [2,4,1].
- *
- * @par Per-axis caps:
- * Each COMM_DIMS[i] is capped by min(size[i], size[ndim-i-1]) to ensure valid
- * redistribution during the FFT computation.
- *
- * @par Inactive ranks:
- * If the tensor cannot be evenly distributed across all ranks, some ranks may
- * become inactive (receiving zero-sized local blocks). Inactive ranks are
- * handled gracefully: plan creation succeeds, execute() and normalize() become
- * no-ops, and isActive() returns false. A warning is printed to stderr when
- * a rank becomes inactive.
- *
- * @param size       Global tensor extents per axis.
- * @param nda        [in,out] Desired distributed axes on input; actual value on output.
- * @param subsize    [out] Local extents per axis for this rank.
- * @param offset     [out] Global starting indices per axis for this rank.
- * @param COMM_DIMS  [out] Cartesian process-grid dimensions (length = ndim).
- *                   Leading `nda` entries contain the grid; trailing entries are 1.
- * @param precision  FFT type (C2C for single, Z2Z for double precision).
- * @param mem_limit  Per-rank memory limit in bytes (see auto-selection above).
- * @param COMM       MPI communicator.
- * @return Status code (SHAFFT_SUCCESS on success, error code on failure).
+ * @param[out] out Plan pointer.
+ * @return 0 on success, non-zero on error.
  */
-int configurationNDA(const std::vector<int>& size, int& nda, std::vector<int>& subsize,
-                     std::vector<int>& offset, std::vector<int>& COMM_DIMS, FFTType precision,
-                     size_t mem_limit, MPI_Comm COMM);
+int FFT1DCreate(detail::FFT1DPlan** out);
 
 /**
- * @brief Compute/validate a Cartesian decomposition and report communicator size.
- * @ingroup cpp_api
+ * @brief Compute process grid and local layout for N-D distributed FFT.
+ * @ingroup cpp_raii_api
  *
- * This function either validates a user-provided Cartesian process grid or
- * auto-selects one, then computes the local tensor block for each rank.
+ * Fallback order: commDims (if fully specified) -> nda -> strategy.
  *
- * @par Auto-selection mode (COMM_DIMS all zeros on input):
- * When all entries of @p COMM_DIMS are 0, the planner automatically selects
- * the optimal grid. The `mem_limit` parameter controls the strategy:
- * - `mem_limit >= 0`: Maximize number of distributed axes
- * - `mem_limit < 0`: Minimize number of distributed axes
- *
- * @par Manual mode (COMM_DIMS non-zero on input):
- * When @p COMM_DIMS contains non-zero values, the provided grid is validated
- * and used directly. The grid must follow the "slab prefix" structure:
- * - Leading entries (indices 0..d-1) must be > 1
- * - Trailing entries (indices d..ndim-1) must be 1 (or 0, which is normalized to 1)
- * - No gaps are allowed (e.g., [2,1,4] is invalid)
- *
- * @par Grid constraints:
- * - Each COMM_DIMS[i] must not exceed min(size[i], size[ndim-i-1])
- * - The product of COMM_DIMS must not exceed the number of MPI ranks
- * - Single rank (world_size=1): COMM_DIMS must be all 1s
- *
- * @par COMM_SIZE output:
- * The @p COMM_SIZE output is set to the product of the leading COMM_DIMS entries
- * where COMM_DIMS[i] > 1. This is the number of ranks that will participate in
- * the computation; remaining ranks become inactive.
- *
- * @par Inactive ranks:
- * Ranks with world_rank >= COMM_SIZE do not participate in the computation.
- * They are handled gracefully: plan creation succeeds, execute() and
- * normalize() become no-ops, isActive() returns false, and allocSize()
- * returns 0. A warning is printed to stderr when a rank becomes inactive.
- *
- * @param size       Global tensor extents per axis.
- * @param subsize    [out] Local extents per axis for this rank.
- * @param offset     [out] Global starting indices per axis for this rank.
- * @param COMM_DIMS  [in,out] Cartesian process-grid dimensions.
- *                   On input: zeros for auto-select, or explicit grid.
- *                   On output: the validated/chosen grid with trailing 1s.
- * @param COMM_SIZE  [out] Number of active ranks (product of leading grid dims).
- * @param precision  FFT type (C2C for single, Z2Z for double precision).
- * @param mem_limit  Per-rank memory limit in bytes.
- * @param COMM       MPI communicator.
- * @return Status code (SHAFFT_SUCCESS on success, error code on failure).
+ * @param size        Global tensor dimensions.
+ * @param precision   FFT precision (C2C or Z2Z).
+ * @param commDims    Process grid [in/out]; zeros = auto.
+ * @param nda         Distributed axes [in/out]; 0 = auto.
+ * @param[out] subsize Local extent per axis.
+ * @param[out] offset  Global offset per axis.
+ * @param[out] commSize Active rank count.
+ * @param strategy    Fallback: MAXIMIZE_NDA or MINIMIZE_NDA.
+ * @param memLimit    Per-rank memory limit in bytes (0 = unlimited).
+ * @param comm        MPI communicator.
+ * @return 0 on success, non-zero on error.
  */
-int configurationCart(const std::vector<int>& size, std::vector<int>& subsize,
-                      std::vector<int>& offset, std::vector<int>& COMM_DIMS, int& COMM_SIZE,
-                      FFTType precision, size_t mem_limit, MPI_Comm COMM);
+int configurationND(const std::vector<size_t>& size,
+                    FFTType precision,
+                    std::vector<int>& commDims,
+                    int& nda,
+                    std::vector<size_t>& subsize,
+                    std::vector<size_t>& offset,
+                    int& commSize,
+                    DecompositionStrategy strategy,
+                    size_t memLimit,
+                    MPI_Comm comm);
 
 /**
- * @brief Build a plan from an NDA decomposition (C-style API).
- * @ingroup cpp_api
- * @note Prefer using Plan::init() for the RAII interface.
- */
-int planNDA(PlanData* plan, int nda, const std::vector<int>& dimensions, FFTType precision,
-            MPI_Comm COMM);
-
-/**
- * @brief Build a plan from an explicit Cartesian process grid (C-style API).
- * @ingroup cpp_api
- * @note Prefer using Plan::initCart() for the RAII interface.
- */
-int planCart(PlanData* plan, const std::vector<int>& COMM_DIMS, const std::vector<int>& dimensions,
-             FFTType precision, MPI_Comm COMM);
-
-/**
- * @brief Release resources held by the plan and null out the pointer.
- * @ingroup cpp_api
+ * @brief Compute local layout for 1D distributed FFT.
+ * @ingroup cpp_raii_api
+ * @ingroup cpp_lowlevel_api
  *
- * Does not free user-provided data/work buffers.
- * @note The RAII Plan class handles this automatically in its destructor.
+ * Call before FFT1D::init() to obtain layout parameters.
+ *
+ * @param globalN         Global FFT size.
+ * @param[out] localN     Local element count.
+ * @param[out] localStart Local offset in global array.
+ * @param precision       FFT precision (C2C or Z2Z).
+ * @param comm            MPI communicator.
+ * @return 0 on success, non-zero on error.
  */
-int destroy(PlanData** plan);
+int configuration1D(
+    size_t globalN, size_t& localN, size_t& localStart, FFTType precision, MPI_Comm comm);
 
 /**
- * @brief Query the current/initial/transformed tensor layout.
- * @ingroup cpp_api
+ * @brief Initialize N-D plan (C-style API).
+ * @ingroup cpp_raii_api
+ * @ingroup cpp_lowlevel_api
  *
- * @return Status::SHAFFT_SUCCESS on success, error otherwise.
+ * Prefer FFTND::init() for RAII interface.
+ *
+ * @param plan       Plan from planNDCreate().
+ * @param commDims   Process grid dimensions.
+ * @param dimensions Global tensor dimensions.
+ * @param precision  FFT precision (C2C or Z2Z).
+ * @param comm       MPI communicator.
+ * @return 0 on success, non-zero on error.
  */
-int getLayout(const PlanData* plan, std::vector<int>& subsize, std::vector<int>& offset,
+int planND(detail::FFTNDPlan* plan,
+           const std::vector<int>& commDims,
+           const std::vector<size_t>& dimensions,
+           FFTType precision,
+           MPI_Comm comm);
+
+/**
+ * @brief Release plan resources and null pointer (C-style API).
+ * @ingroup cpp_lowlevel_api
+ *
+ * Does not free user buffers. RAII classes handle this automatically.
+ *
+ * @param[in,out] plan Plan pointer; set to nullptr on success.
+ * @return 0 on success, non-zero on error.
+ */
+int destroy(detail::PlanBase** plan);
+
+/**
+ * @brief Query tensor layout (C-style API).
+ * @ingroup cpp_lowlevel_api
+ *
+ * @param plan     Plan handle.
+ * @param[out] subsize Local extent per axis.
+ * @param[out] offset  Global offset per axis.
+ * @param layout   Layout to query (CURRENT, INITIAL, or REDISTRIBUTED).
+ * @return 0 on success, non-zero on error.
+ */
+int getLayout(const detail::PlanBase* plan,
+              std::vector<size_t>& subsize,
+              std::vector<size_t>& offset,
               TensorLayout layout);
 
 /**
- * @brief Query the current/initial/transformed tensor axes (contiguous/distributed).
- * @ingroup cpp_api
+ * @brief Query axis distribution (C-style API).
+ * @ingroup cpp_lowlevel_api
  *
- * @return Status::SHAFFT_SUCCESS on success, error otherwise.
+ * @param plan   Plan handle.
+ * @param[out] ca Contiguous (non-distributed) axes.
+ * @param[out] da Distributed axes.
+ * @param layout Layout to query (CURRENT, INITIAL, or REDISTRIBUTED).
+ * @return 0 on success, non-zero on error.
  */
-int getAxes(const PlanData* plan, std::vector<int>& ca, std::vector<int>& da, TensorLayout layout);
+int getAxes(const detail::PlanBase* plan,
+            std::vector<int>& ca,
+            std::vector<int>& da,
+            TensorLayout layout);
 
 /**
- * @brief Report the total buffer size required by the plan (in elements).
- * @ingroup cpp_api
+ * @brief Get required buffer size in complex elements (C-style API).
+ * @ingroup cpp_lowlevel_api
  *
- * Fills @p alloc_size with the number of elements (of the plan's FFT type)
- * required across data + work buffers.
- *
- * @param plan        Plan handle (initialized).
- * @param alloc_size  [out] Required element count.
- * @return Status code (0 on success, non-zero on failure).
+ * @param plan            Plan handle.
+ * @param[out] localAllocSize Required buffer size in complex elements.
+ * @return 0 on success, non-zero on error.
  */
-int getAllocSize(const PlanData* plan, size_t& alloc_size);
+int getAllocSize(const detail::PlanBase* plan, size_t& localAllocSize);
 
 /**
- * @brief Execute the FFT associated with the plan.
- * @ingroup cpp_api
+ * @brief Execute transform (C-style API).
+ * @ingroup cpp_lowlevel_api
+ *
+ * @param plan      Plan handle.
+ * @param direction FORWARD or BACKWARD.
+ * @return 0 on success, non-zero on error.
  */
-int execute(PlanData* plan, FFTDirection direction);
+int execute(detail::PlanBase* plan, FFTDirection direction);
 
 /**
- * @brief Apply normalization to the current data buffer.
- * @ingroup cpp_api
+ * @brief Apply normalization (C-style API).
+ * @ingroup cpp_lowlevel_api
+ *
+ * @param plan Plan handle.
+ * @return 0 on success, non-zero on error.
  */
-int normalize(PlanData* plan);
-
-//==============================================================================
-// Library information
-//==============================================================================
+int normalize(detail::PlanBase* plan);
 
 /**
  * @brief Get the name of the FFT backend used at compile time.
- * @ingroup cpp_api
+ * @ingroup cpp_raii_api
+ * @ingroup cpp_lowlevel_api
  * @return "FFTW" or "hipFFT".
  */
 inline const char* getBackendName() noexcept {
@@ -558,33 +970,185 @@ inline const char* getBackendName() noexcept {
 
 /**
  * @brief Library version information.
- * @ingroup cpp_api
+ * @ingroup cpp_raii_api
+ * @ingroup cpp_lowlevel_api
  */
 struct Version {
-  int major;  ///< Major version number.
-  int minor;  ///< Minor version number.
-  int patch;  ///< Patch version number.
+  /**@brief Major version number. */
+  int major; ///< Major version number.
+  /**@brief Minor version number. */
+  int minor; ///< Minor version number.
+  /**@brief Patch version number. */
+  int patch; ///< Patch version number.
 };
 
 /**
  * @brief Get the library version as a struct.
- * @ingroup cpp_api
+ * @ingroup cpp_raii_api
+ * @ingroup cpp_lowlevel_api
+ *
+ * @return Version with @c major, @c minor, and @c patch fields populated.
  */
 inline Version getVersion() noexcept {
   return {SHAFFT_VERSION_MAJOR, SHAFFT_VERSION_MINOR, SHAFFT_VERSION_PATCH};
 }
 
 /**
- * @brief Get the library version as a string (e.g., "0.1.0-alpha").
- * @ingroup cpp_api
+ * @brief Get the library version as a string (e.g., "1.1.0-alpha").
+ * @ingroup cpp_raii_api
  */
 inline const char* getVersionString() noexcept {
-  // Computed at compile time
-  static const char version[] = SHAFFT_STRINGIFY(SHAFFT_VERSION_MAJOR) "." SHAFFT_STRINGIFY(
+  return SHAFFT_STRINGIFY(SHAFFT_VERSION_MAJOR) "." SHAFFT_STRINGIFY(
       SHAFFT_VERSION_MINOR) "." SHAFFT_STRINGIFY(SHAFFT_VERSION_PATCH) SHAFFT_VERSION_SUFFIX;
-  return version;
 }
 
-}  // namespace shafft
+/**
+ * @brief Finalize library and release backend resources.
+ * @ingroup cpp_raii_api
+ * @ingroup cpp_lowlevel_api
+ *
+ * Call after all plans are destroyed, before MPI_Finalize() for FFTW backend.
+ * Safe to call multiple times.
+ *
+ * @return 0 on success, non-zero on error.
+ */
+[[nodiscard]] int finalize() noexcept;
 
-#endif  // SHAFFT_CPP_H
+// ---- Config wrapper classes ------------------------------------------------
+
+/**
+ * @brief RAII wrapper for N-D configuration objects.
+ * @ingroup cpp_raii_api
+ *
+ * Manages the lifecycle of an shafft_nd_config_t C struct with RAII semantics.
+ * Constructor performs init+resolve in one call. Provides operator->() for
+ * direct arrow-syntax access to the underlying C struct fields.
+ */
+class ConfigND {
+public:
+  /**
+   * @brief Construct, initialize, and resolve an N-D config.
+   *
+   * @param globalShape  Global extents per axis; ndim inferred from size().
+   * @param precision    FFT type (C2C or Z2Z).
+   * @param commDims     Process grid hint (empty = auto).
+   * @param hintNda      Distributed axes hint (0 = auto).
+   * @param strategy     Decomposition strategy.
+   * @param outputPolicy Forward output-layout policy.
+   * @param memLimit     Per-rank memory limit (0 = no limit).
+   * @param comm         MPI communicator.
+   * @throws None. Check status() after construction.
+   */
+  ConfigND(const std::vector<size_t>& globalShape,
+           FFTType precision,
+           const std::vector<int>& commDims = {},
+           int hintNda = 0,
+           DecompositionStrategy strategy = DecompositionStrategy::MAXIMIZE_NDA,
+           TransformLayout outputPolicy = TransformLayout::REDISTRIBUTED,
+           size_t memLimit = 0,
+           MPI_Comm comm = MPI_COMM_WORLD) noexcept;
+
+  /// @brief Non-copyable.
+  ConfigND(const ConfigND&) = delete;
+  ConfigND& operator=(const ConfigND&) = delete;
+
+  /// @brief Move constructor.
+  ConfigND(ConfigND&& other) noexcept;
+
+  /// @brief Move assignment.
+  ConfigND& operator=(ConfigND&& other) noexcept;
+
+  /// @brief Destructor. Releases internal resources.
+  ~ConfigND() noexcept;
+
+  /// @brief Check if init succeeded.
+  [[nodiscard]] int status() const noexcept { return status_; }
+
+  /// @brief Read-only access to the underlying C struct.
+  [[nodiscard]] const shafft_nd_config_t& cStruct() const noexcept { return cfg_; }
+
+  /// @brief Mutable access (for advanced usage or direct field writes).
+  [[nodiscard]] shafft_nd_config_t& cStruct() noexcept { return cfg_; }
+
+  /// @brief Arrow-syntax access to underlying C struct (const).
+  [[nodiscard]] const shafft_nd_config_t* operator->() const noexcept { return &cfg_; }
+
+  /// @brief Arrow-syntax access to underlying C struct (mutable).
+  [[nodiscard]] shafft_nd_config_t* operator->() noexcept { return &cfg_; }
+
+  /// @brief Re-resolve configuration using stored worldComm.
+  [[nodiscard]] int resolve() noexcept;
+
+  /// @brief Check if the config has been successfully resolved.
+  [[nodiscard]] bool isResolved() const noexcept {
+    return (cfg_.flags & SHAFFT_CONFIG_RESOLVED) != 0;
+  }
+
+private:
+  shafft_nd_config_t cfg_ = {};
+  int status_ = -1;
+};
+
+/**
+ * @brief RAII wrapper for 1-D configuration objects.
+ * @ingroup cpp_raii_api
+ *
+ * Manages the lifecycle of an shafft_1d_config_t C struct with RAII semantics.
+ * Constructor performs init+resolve in one call. Provides operator->() for
+ * direct arrow-syntax access to the underlying C struct fields.
+ */
+class Config1D {
+public:
+  /**
+   * @brief Construct, initialize, and resolve a 1-D config.
+   * @param globalSize Global FFT length (> 0).
+   * @param precision  FFT type (C2C or Z2Z).
+   * @param comm       MPI communicator.
+   * @throws None. Check status() after construction.
+   */
+  Config1D(size_t globalSize, FFTType precision, MPI_Comm comm) noexcept;
+
+  /// @brief Non-copyable.
+  Config1D(const Config1D&) = delete;
+  Config1D& operator=(const Config1D&) = delete;
+
+  /// @brief Move constructor.
+  Config1D(Config1D&& other) noexcept;
+
+  /// @brief Move assignment.
+  Config1D& operator=(Config1D&& other) noexcept;
+
+  /// @brief Destructor.
+  ~Config1D() noexcept;
+
+  /// @brief Check if init succeeded.
+  [[nodiscard]] int status() const noexcept { return status_; }
+
+  /// @brief Read-only access to the underlying C struct.
+  [[nodiscard]] const shafft_1d_config_t& cStruct() const noexcept { return cfg_; }
+
+  /// @brief Mutable access to the underlying C struct.
+  [[nodiscard]] shafft_1d_config_t& cStruct() noexcept { return cfg_; }
+
+  /// @brief Arrow-syntax access to underlying C struct (const).
+  [[nodiscard]] const shafft_1d_config_t* operator->() const noexcept { return &cfg_; }
+
+  /// @brief Arrow-syntax access to underlying C struct (mutable).
+  [[nodiscard]] shafft_1d_config_t* operator->() noexcept { return &cfg_; }
+
+  /// @brief Re-resolve configuration using stored worldComm.
+  [[nodiscard]] int resolve() noexcept;
+
+  /// @brief Check if resolved.
+  [[nodiscard]] bool isResolved() const noexcept {
+    return (cfg_.flags & SHAFFT_CONFIG_RESOLVED) != 0;
+  }
+
+private:
+  shafft_1d_config_t cfg_ = {};
+  int status_ = -1;
+};
+
+} // namespace shafft
+
+#endif // SHAFFT_CPP_H

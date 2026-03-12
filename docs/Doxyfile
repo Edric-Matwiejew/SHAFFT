@@ -1,10 +1,10 @@
 # Difference with default Doxyfile 1.9.8
 PROJECT_NAME           = SHAFFT
-PROJECT_NUMBER         = 0.1.0-alpha
+PROJECT_NUMBER         = 1.1.0-alpha
 PROJECT_BRIEF          = "A Scalable High-dimensional Accelerated FFT Library"
 OUTPUT_DIRECTORY       = docs
 REPEAT_BRIEF           = NO
-OPTIMIZE_OUTPUT_FOR_C  = YES
+OPTIMIZE_OUTPUT_FOR_C  = NO
 OPTIMIZE_FOR_FORTRAN   = YES
 EXTENSION_MAPPING      = hpp=C++ \
                          f03=Fortran \
@@ -15,11 +15,13 @@ HIDE_UNDOC_MEMBERS     = YES
 HIDE_UNDOC_CLASSES     = YES
 SORT_MEMBER_DOCS       = NO
 SHOW_FILES             = NO
+SHOW_INCLUDE_FILES     = NO
+VERBATIM_HEADERS       = NO
+SOURCE_BROWSER         = NO
 SHOW_NAMESPACES        = NO
 LAYOUT_FILE            = docs/DoxygenLayout.xml
 WARN_IF_UNDOCUMENTED   = NO
 INPUT                  = include/shafft \
-                         src/cpp \
                          src/c \
                          src/f03 \
                          README.md \
@@ -35,6 +37,9 @@ INPUT                  = include/shafft \
                          docs/limitations.dox \
                          examples
 RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */detail/slab* \
+                         */detail/plan* \
+                         */detail/error*
 EXAMPLE_PATH           = examples
 EXAMPLE_PATTERNS       = *.c \
                          *.cpp \

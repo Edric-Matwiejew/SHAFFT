@@ -1,53 +1,69 @@
 # User Guide {#user-guide}
 
-This guide covers the SHAFFT API, portable buffer management, and complete examples for C++, C, and Fortran.
+API usage with complete examples for C++, C, and Fortran.
 
 ## Concepts
 
 ### Slab Decomposition
 
-SHAFFT distributes N-dimensional tensors across MPI ranks using slab decomposition. The tensor is divided along one or more axes, with each rank owning a contiguous "slab" of the data.
+SHAFFT distributes N-dimensional tensors across MPI ranks using slab decomposition:
+- Tensor is divided along one or more axes (distributed axes)
+- Each rank owns a contiguous "slab" of data
+- Remaining axes stay local (contiguous axes)
 
-For a 3D tensor of shape `[Nx, Ny, Nz]` distributed across `P` ranks along axis 0:
-- Each rank owns approximately `Nx/P` slices
+For a 3D tensor `[Nx, Ny, Nz]` distributed across `P` ranks along axis 0:
+- Each rank owns ~`Nx/P` slices
 - Each slice contains the full `Ny x Nz` plane
 
 ### Plan-Based API
 
-SHAFFT uses a plan-based API similar to FFTW:
-
-1. **Create** a plan object
-2. **Initialize** with tensor shape, FFT type, and MPI communicator
+1. **Create** plan object
+2. **Initialize** with shape, FFT type, and MPI communicator
 3. **Allocate** data and work buffers
 4. **Set** buffers on the plan
-5. **Execute** forward/backward transforms
-6. **Normalize** after inverse transform (optional)
-7. **Release** resources
+5. **Plan** backend-specific FFTs
+6. **Execute** forward/backward transforms
+7. **Query** current buffers after `execute()` for FFTND (buffers may swap)
+8. **Normalize** after each transform (symmetric scaling)
+9. **Release** resources, then **Finalize** the library before `MPI_Finalize()` when using the FFTW backend
 
 ### Buffer Requirements
 
 SHAFFT requires two separate buffers of equal size:
-- **Data buffer**: Holds input/output data
-- **Work buffer**: Used for internal transpositions and communication
+- **Data buffer**: Input/output data
+- **Work buffer**: Internal transpositions and communication
 
-The required size (in elements) is returned by `allocSize()` and may be larger than the tensor size due to padding for efficient MPI communication.
+Size (in elements) returned by `allocSize()` may exceed tensor size due to padding.
+
+Both FFTND and FFT1D swap buffers internally after each `execute()` call, so `data` always
+contains the result. Always call `getBuffers()` after `execute()` to locate output.
+`normalize()` scales the current data buffer (where the result is).
+
+### Normalization
+
+SHAFFT uses symmetric normalization: each transform is scaled by `1/sqrt(N)`.
+Call `normalize()` after each `execute()` for correct scaling:
+
+```cpp
+fft.execute(shafft::FFTDirection::FORWARD);
+fft.normalize();  // Scale by 1/sqrt(N)
+
+fft.execute(shafft::FFTDirection::BACKWARD);
+fft.normalize();  // Scale by 1/sqrt(N) (total: 1/N for round-trip)
+```
 
 ## Portable Buffer API
 
-SHAFFT provides portable buffer management functions that automatically use the correct memory type for the active backend:
+Backend-agnostic buffer management:
 
-| C++ Function | C Function | Fortran Subroutine | Description |
-|--------------|------------|-------------------|-------------|
-| `shafft::allocBuffer(n, &ptr)` | `shafftAllocBufferF/D(n, &ptr)` | `shafftAllocBuffer(n, ptr)` | Allocate buffer (device memory on GPU, host on CPU) |
-| `shafft::freeBuffer(ptr)` | `shafftFreeBufferF/D(ptr)` | `shafftFreeBuffer(ptr)` | Free buffer |
-| `shafft::copyToBuffer(dst, src, n)` | `shafftCopyToBufferF/D(dst, src, n)` | `shafftCopyToBuffer(dst, src, n)` | Copy from host array to buffer |
-| `shafft::copyFromBuffer(dst, src, n)` | `shafftCopyFromBufferF/D(dst, src, n)` | `shafftCopyFromBuffer(dst, src, n)` | Copy from buffer to host array |
+| C++ | C | Description |
+|-----|---|-------------|
+| `shafft::allocBuffer(n, &ptr)` | `shafftAllocBufferF/D(n, &ptr)` | Allocate buffer |
+| `shafft::freeBuffer(ptr)` | `shafftFreeBufferF/D(ptr)` | Free buffer |
+| `shafft::copyToBuffer(dst, src, n)` | `shafftCopyToBufferF/D(...)` | Copy host -> buffer |
+| `shafft::copyFromBuffer(dst, src, n)` | `shafftCopyFromBufferF/D(...)` | Copy buffer -> host |
 
-**Notes:**
-- C API: `F` suffix is for single precision (complexf), `D` for double precision (complexd)
-- Fortran: Generic interfaces automatically select precision based on argument types
-
-Using these functions allows writing code that works unchanged on both GPU and CPU backends.
+C API: `F` = single precision, `D` = double precision.
 
 ## Runtime Queries
 
@@ -55,7 +71,6 @@ Using these functions allows writing code that works unchanged on both GPU and C
 // C++
 const char* backend = shafft::getBackendName();  // "FFTW" or "hipFFT"
 shafft::Version v = shafft::getVersion();
-printf("SHAFFT %d.%d.%d\n", v.major, v.minor, v.patch);
 ```
 
 ```c
@@ -67,25 +82,19 @@ shafftGetVersion(&major, &minor, &patch);
 
 ```fortran
 ! Fortran
-character(len=32) :: backend_name, version_str
-integer :: major, minor, patch
-
-call shafftGetBackendName(backend_name)
-call shafftGetVersion(major, minor, patch)
-call shafftGetVersionString(version_str)
+character(len=32) :: backend
+call shafftGetBackendName(backend)
 ```
 
 ## C++ API
 
-The C++ API provides the `shafft::Plan` class with member functions.
-
-### Complete Example
+### N-Dimensional FFT (FFTND)
 
 ```cpp
 #include <shafft/shafft.hpp>
 #include <mpi.h>
-#include <vector>
 #include <cstdio>
+#include <vector>
 
 int main(int argc, char** argv) {
     MPI_Init(&argc, &argv);
@@ -93,41 +102,51 @@ int main(int argc, char** argv) {
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     
+    // Query decomposition (commDims auto-selected)
+    std::vector<size_t> dims = {64, 64, 32};
+    std::vector<int> commDims(dims.size(), 0);
+    std::vector<size_t> subsize(dims.size()), offset(dims.size());
+    int nda = 0, commSize = 0;
+    shafft::configurationND(dims, shafft::FFTType::C2C, commDims, nda,
+                            subsize, offset, commSize,
+                            shafft::DecompositionStrategy::MAXIMIZE_NDA,
+                            0, MPI_COMM_WORLD);
+
     // Create and initialize plan
-    shafft::Plan plan;
-    std::vector<int> shape = {64, 64, 32};
-    plan.init(1, shape, shafft::FFTType::C2C, MPI_COMM_WORLD);
-    
-    // Allocate buffers using portable API
-    size_t alloc_size = plan.allocSize();
+    shafft::FFTND fft;
+    fft.init(commDims, dims, shafft::FFTType::C2C, MPI_COMM_WORLD);
+    // Allocate buffers
+    size_t n = fft.allocSize();
     shafft::complexf *data, *work;
-    shafft::allocBuffer(alloc_size, &data);
-    shafft::allocBuffer(alloc_size, &work);
+    shafft::allocBuffer(n, &data);
+    shafft::allocBuffer(n, &work);
     
-    // Initialize data (example: all ones)
-    std::vector<shafft::complexf> host_data(alloc_size, {1.0f, 0.0f});
-    shafft::copyToBuffer(data, host_data.data(), alloc_size);
+    // Initialize data
+    std::vector<shafft::complexf> host(n, {1.0f, 0.0f});
+    shafft::copyToBuffer(data, host.data(), n);
     
-    // Set buffers and execute
-    plan.setBuffers(data, work);
-    plan.execute(shafft::FFTDirection::FORWARD);
+    // Execute round-trip
+    fft.setBuffers(data, work);
+    fft.plan();
+    fft.execute(shafft::FFTDirection::FORWARD);
+    fft.normalize();
     
-    // Inverse transform
-    plan.execute(shafft::FFTDirection::BACKWARD);
-    plan.normalize();  // Scale by 1/N
+    fft.execute(shafft::FFTDirection::BACKWARD);
+    fft.normalize();
     
-    // Copy result back to host
-    shafft::copyFromBuffer(host_data.data(), data, alloc_size);
+    // Copy result (FFTND swaps buffers internally)
+    fft.getBuffers(&data, &work);
+    shafft::copyFromBuffer(host.data(), data, n);
     
     if (rank == 0) {
-        printf("Result[0] = (%f, %f)\n", 
-               host_data[0].real(), host_data[0].imag());
+        std::printf("Result[0] = (%f, %f)\n", host[0].real(), host[0].imag());
     }
     
-    // Cleanup (must call before MPI_Finalize)
-    plan.release();
+    // Cleanup
+    fft.release();
     shafft::freeBuffer(data);
     shafft::freeBuffer(work);
+    shafft::finalize();  // Required for FFTW backend
     
     MPI_Finalize();
     return 0;
@@ -138,24 +157,94 @@ int main(int argc, char** argv) {
 
 | Type | Description |
 |------|-------------|
-| `shafft::Plan` | FFT plan class |
-| `shafft::complexf` | Single-precision complex (`std::complex<float>`) |
-| `shafft::complexd` | Double-precision complex (`std::complex<double>`) |
-| `shafft::FFTType::C2C` | Single-precision complex-to-complex |
-| `shafft::FFTType::Z2Z` | Double-precision complex-to-complex |
+| `shafft::FFTND` | N-dimensional distributed FFT plan |
+| `shafft::FFT1D` | 1D distributed FFT plan |
+| `shafft::complexf` | Single precision (`std::complex<float>`) |
+| `shafft::complexd` | Double precision (`std::complex<double>`) |
+| `shafft::FFTType::C2C` | Single precision complex-to-complex |
+| `shafft::FFTType::Z2Z` | Double precision complex-to-complex |
 | `shafft::FFTDirection::FORWARD` | Forward transform |
-| `shafft::FFTDirection::BACKWARD` | Backward (inverse) transform |
+| `shafft::FFTDirection::BACKWARD` | Backward transform |
+
+### 1D Distributed FFT (FFT1D)
+
+For large 1D FFTs distributed across MPI ranks:
+
+```cpp
+#include <shafft/shafft.hpp>
+#include <mpi.h>
+
+int main(int argc, char** argv) {
+    MPI_Init(&argc, &argv);
+    
+    size_t N = 1048576;
+    size_t localN, localStart;
+    shafft::configuration1D(N, localN, localStart,
+                            shafft::FFTType::C2C, MPI_COMM_WORLD);
+    
+    shafft::FFT1D fft;
+    fft.init(N, localN, localStart, shafft::FFTType::C2C, MPI_COMM_WORLD);
+    
+    size_t n = fft.allocSize();
+    shafft::complexf *data, *work;
+    shafft::allocBuffer(n, &data);
+    shafft::allocBuffer(n, &work);
+    
+    fft.setBuffers(data, work);
+    fft.plan();
+    
+    fft.execute(shafft::FFTDirection::FORWARD);
+    fft.getBuffers(&data, &work);  // data now contains result
+    fft.normalize();  // Normalizes the data buffer
+    
+    fft.execute(shafft::FFTDirection::BACKWARD);
+    fft.getBuffers(&data, &work);  // data now contains result
+    fft.normalize();
+    
+    fft.release();
+    shafft::freeBuffer(data);
+    shafft::freeBuffer(work);
+    shafft::finalize();  // Required for FFTW backend
+    
+    MPI_Finalize();
+    return 0;
+}
+```
+
+See @ref decomposition for FFT1D buffer semantics.
+
+### Config-Object Planning (Alternative)
+
+You can also build plans from resolved config objects to inspect decomposition metadata before
+plan initialization.
+
+```cpp
+// N-D config path
+std::vector<size_t> dims = {64, 64, 32};
+shafft::ConfigND cfgND(dims, shafft::FFTType::C2C);
+if (cfgND.status() != 0) return 1;
+
+shafft::FFTND fftND;
+fftND.init(cfgND.cStruct());
+fftND.plan();
+
+// 1-D config path
+size_t N = 1048576;
+shafft::Config1D cfg1D(N, shafft::FFTType::C2C, MPI_COMM_WORLD);
+if (cfg1D.status() != 0) return 1;
+
+shafft::FFT1D fft1D;
+fft1D.init(cfg1D.cStruct());
+fft1D.plan();
+```
 
 ## C API
-
-The C API uses opaque plan handles.
-
-### Complete Example
 
 ```c
 #include <shafft/shafft.h>
 #include <mpi.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <complex.h>
 
 int main(int argc, char** argv) {
@@ -164,70 +253,93 @@ int main(int argc, char** argv) {
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     
-    // Create plan
-    void* plan;
-    shafftPlanCreate(&plan);
+    // Create plan and configure decomposition
+    void* plan = NULL;
+    shafftNDCreate(&plan);
     
-    // Initialize
     int dims[] = {64, 64, 32};
-    shafftPlanNDA(plan, 3, 1, dims, SHAFFT_C2C, MPI_COMM_WORLD);
+    int commDims[] = {0, 0, 0};  // auto-select grid
+    int nda = 0, commSize = 0;
+    size_t subsize[3], offset[3];
+    shafftConfigurationND(3, dims, SHAFFT_C2C, commDims, &nda,
+                          subsize, offset, &commSize,
+                          SHAFFT_MAXIMIZE_NDA, 0, MPI_COMM_WORLD);
     
+    shafftNDInit(plan, 3, commDims, dims, SHAFFT_C2C, MPI_COMM_WORLD,
+                 SHAFFT_LAYOUT_REDISTRIBUTED);
     // Allocate buffers
-    size_t alloc_size;
-    shafftGetAllocSize(plan, &alloc_size);
+    size_t n;
+    shafftGetAllocSize(plan, &n);
     
     void *data, *work;
-    shafftAllocBufferF(alloc_size, &data);
-    shafftAllocBufferF(alloc_size, &work);
+    shafftAllocBufferF(n, &data);
+    shafftAllocBufferF(n, &work);
     
-    // Initialize data on host and copy to buffer
-    float complex* host_data = malloc(alloc_size * sizeof(float complex));
-    for (size_t i = 0; i < alloc_size; i++) {
-        host_data[i] = 1.0f + 0.0f * I;
-    }
-    shafftCopyToBufferF(data, host_data, alloc_size);
+    // Initialize and copy
+    float complex* host = malloc(n * sizeof(float complex));
+    for (size_t i = 0; i < n; i++) host[i] = 1.0f;
+    shafftCopyToBufferF(data, host, n);
     
-    // Execute transforms
+    // Execute round-trip
     shafftSetBuffers(plan, data, work);
+    shafftPlan(plan);
     shafftExecute(plan, SHAFFT_FORWARD);
+    shafftNormalize(plan);
     shafftExecute(plan, SHAFFT_BACKWARD);
     shafftNormalize(plan);
     
-    // Copy result back
-    shafftCopyFromBufferF(host_data, data, alloc_size);
+    // Copy result (FFTND swaps buffers internally)
+    shafftGetBuffers(plan, &data, &work);
+    shafftCopyFromBufferF(host, data, n);
     
     if (rank == 0) {
-        printf("Result[0] = (%f, %f)\n", 
-               crealf(host_data[0]), cimagf(host_data[0]));
+        printf("Result[0] = (%f, %f)\n", crealf(host[0]), cimagf(host[0]));
     }
     
     // Cleanup
     shafftDestroy(&plan);
     shafftFreeBufferF(data);
     shafftFreeBufferF(work);
-    free(host_data);
+    free(host);
+    shafftFinalize();  // Required for FFTW backend
     
     MPI_Finalize();
     return 0;
 }
 ```
 
-### Key C Constants
+### C Config-Object Path (Alternative)
+
+```c
+size_t shape[3] = {64, 64, 32};
+shafft_nd_config_t cfg = {0};
+shafftConfigNDInit(&cfg, 3, shape, SHAFFT_C2C,
+                   NULL, 0, SHAFFT_MAXIMIZE_NDA,
+                   SHAFFT_LAYOUT_REDISTRIBUTED, 0, MPI_COMM_WORLD);
+
+void* plan = NULL;
+shafftNDCreate(&plan);
+shafftNDInitFromConfig(plan, &cfg);
+shafftPlan(plan);
+
+shafftDestroy(&plan);
+shafftConfigNDRelease(&cfg);
+```
+
+For 1-D, use `shafftConfig1DInit(...)` and `shafft1DInitFromConfig(...)`.
+
+### C Constants
 
 | Constant | Description |
 |----------|-------------|
-| `SHAFFT_C2C` | Single-precision complex-to-complex |
-| `SHAFFT_Z2Z` | Double-precision complex-to-complex |
+| `SHAFFT_C2C` | Single precision complex-to-complex |
+| `SHAFFT_Z2Z` | Double precision complex-to-complex |
 | `SHAFFT_FORWARD` | Forward transform |
-| `SHAFFT_BACKWARD` | Backward (inverse) transform |
+| `SHAFFT_BACKWARD` | Backward transform |
 
 ## Fortran API
 
-The Fortran API uses a module interface with portable buffer management.
-All wrappers return a SHAFFT status code via a required @c ierr argument.
-Call @c shafftLastErrorMessage() for human-readable text.
-
-### Complete Example
+Most subroutines return status via `ierr`. Call `shafftLastErrorMessage()` for details.
 
 ```fortran
 program example_f03
@@ -237,88 +349,97 @@ program example_f03
   implicit none
 
   type(c_ptr) :: plan
-  integer :: ierr, rank
+  integer :: ierr, rank, nda, commSize
   integer(c_int) :: dims(3) = [64, 64, 32]
-  integer(c_size_t) :: alloc_size
+  integer(c_int) :: commDims(3)
+  integer(c_size_t) :: n, subsize(3), offset(3)
   complex(c_double), pointer :: data(:) => null()
   complex(c_double), pointer :: work(:) => null()
-  complex(c_double), allocatable :: host_data(:)
+  complex(c_double), allocatable :: host(:)
 
   call MPI_Init(ierr)
   call MPI_Comm_rank(MPI_COMM_WORLD, rank, ierr)
 
-  ! Initialize plan (double precision Z2Z)
-  call shafftPlanNDA(plan, 3, 1, dims, SHAFFT_Z2Z, MPI_COMM_WORLD%MPI_VAL, ierr)
+  ! Query decomposition (commDims auto-selected)
+  commDims = 0
+  call shafftConfigurationND(dims, SHAFFT_Z2Z, commDims, nda, subsize, offset, &
+                             commSize, SHAFFT_MAXIMIZE_NDA, 0_c_size_t, &
+                             MPI_COMM_WORLD, ierr)
 
-  ! Get allocation size and allocate buffers
-  call shafftGetAllocSize(plan, alloc_size, ierr)
-  call shafftAllocBuffer(alloc_size, data, ierr)
-  call shafftAllocBuffer(alloc_size, work, ierr)
+  ! Create plan
+  call shafftNDCreate(plan, ierr)
+  call shafftNDInit(plan, commDims, dims, SHAFFT_Z2Z, MPI_COMM_WORLD, &
+                    SHAFFT_LAYOUT_REDISTRIBUTED, ierr)
+  ! Allocate buffers
+  call shafftGetAllocSize(plan, n, ierr)
+  call shafftAllocBuffer(n, data, ierr)
+  call shafftAllocBuffer(n, work, ierr)
 
-  ! Initialize host data and copy to buffer
-  allocate(host_data(alloc_size))
-  host_data = (1.0d0, 0.0d0)
-  call shafftCopyToBuffer(data, host_data, alloc_size, ierr)
+  ! Initialize and copy
+  allocate(host(n))
+  host = (1.0d0, 0.0d0)
+  call shafftCopyToBuffer(data, host, n, ierr)
 
-  ! Execute transforms
+  ! Execute round-trip
   call shafftSetBuffers(plan, data, work, ierr)
+  call shafftPlan(plan, ierr)
   call shafftExecute(plan, SHAFFT_FORWARD, ierr)
+  call shafftNormalize(plan, ierr)
   call shafftExecute(plan, SHAFFT_BACKWARD, ierr)
   call shafftNormalize(plan, ierr)
 
-  ! Get current buffers (may have been swapped) and copy result back
-  call shafftGetBuffers(plan, alloc_size, data, work, ierr)
-  call shafftCopyFromBuffer(host_data, data, alloc_size, ierr)
+  ! Copy result (FFTND swaps buffers internally)
+  call shafftGetBuffers(plan, n, data, work, ierr)
+  call shafftCopyFromBuffer(host, data, n, ierr)
 
-  if (rank == 0) then
-    print '(A,2F10.4)', 'Result[1] = ', host_data(1)
-  end if
+  if (rank == 0) print '(A,2F10.4)', 'Result[1] = ', host(1)
 
   ! Cleanup
   call shafftDestroy(plan, ierr)
   call shafftFreeBuffer(data, ierr)
   call shafftFreeBuffer(work, ierr)
-  deallocate(host_data)
+  deallocate(host)
+  call shafftFinalize(ierr)
 
   call MPI_Finalize(ierr)
 end program
 ```
 
-### Key Fortran Subroutines
+### Fortran Config-Object Path (Alternative)
 
-| Subroutine (all return `ierr`) | Description |
-|--------------------------------|-------------|
-| `shafftPlanNDA(plan, ndim, nda, dims, type, comm, ierr)` | Create plan with NDA decomposition |
-| `shafftPlanCart(plan, comm_dims, dims, type, comm, ierr)` | Create plan with Cartesian decomposition |
-| `shafftGetAllocSize(plan, alloc_size, ierr)` | Get required buffer allocation size |
-| `shafftAllocBuffer(n, ptr, ierr)` | Allocate buffer (precision auto-detected) |
-| `shafftFreeBuffer(ptr, ierr)` | Free buffer |
-| `shafftCopyToBuffer(dst, src, n, ierr)` | Copy host array to buffer (n optional) |
-| `shafftCopyFromBuffer(dst, src, n, ierr)` | Copy buffer to host array (n optional) |
-| `shafftSetBuffers(plan, data, work, ierr)` | Set data and work buffers |
-| `shafftGetBuffers(plan, n, data, work, ierr)` | Get current buffer pointers (`n` optional; if omitted the wrapper queries `shafftGetAllocSize`) |
-| `shafftExecute(plan, direction, ierr)` | Execute FFT |
-| `shafftNormalize(plan, ierr)` | Normalize after inverse FFT |
-| `shafftDestroy(plan, ierr)` | Release plan resources |
+```fortran
+type(shafft_config_nd_t) :: cfg
+type(c_ptr) :: plan
+integer(c_int) :: ierr
+integer(c_size_t) :: globalShape(3) = [64_c_size_t, 64_c_size_t, 32_c_size_t]
 
-### Key Fortran Constants
+call shafftConfigNDInit(cfg, 3, globalShape, SHAFFT_C2C, &
+                        hintNda=0, strategy=SHAFFT_MAXIMIZE_NDA, &
+                        outputPolicy=SHAFFT_LAYOUT_REDISTRIBUTED, &
+                        memLimit=0_c_size_t, comm=MPI_COMM_WORLD, ierr=ierr)
+call shafftNDCreate(plan, ierr)
+call shafftNDInitFromConfig(plan, cfg, ierr)
+call shafftPlan(plan, ierr)
+
+call shafftDestroy(plan, ierr)
+call shafftConfigNDRelease(cfg)
+```
+
+For 1-D, use `shafftConfig1DInit(...)` and `shafft1DInitFromConfig(...)`.
+
+### Fortran Constants
 
 | Constant | Description |
 |----------|-------------|
-| `SHAFFT_C2C` | Single-precision complex-to-complex |
-| `SHAFFT_Z2Z` | Double-precision complex-to-complex |
+| `SHAFFT_C2C` | Single precision complex-to-complex |
+| `SHAFFT_Z2Z` | Double precision complex-to-complex |
 | `SHAFFT_FORWARD` | Forward transform |
-| `SHAFFT_BACKWARD` | Backward (inverse) transform |
+| `SHAFFT_BACKWARD` | Backward transform |
 
-## Limitations
-
-- **1D tensors**: Cannot be distributed across MPI ranks. For 1D FFTs with multiple ranks, each rank computes independently.
-- **Contiguous axes**: At least one axis must remain contiguous (non-distributed).
-- **Transform types**: Only complex-to-complex (C2C/Z2Z) transforms are currently supported.
-
-See the @ref limitations page for complete details.
+---
 
 ## See Also
 
-- @ref decomposition - Understanding decomposition modes and planning options
-- @ref tensor-layout - How tensors are distributed and how layouts change during transforms
+- @ref decomposition - Decomposition modes and FFT1D details
+- @ref tensor-layout - Tensor distribution and layout queries
+- @ref limitations - Known constraints

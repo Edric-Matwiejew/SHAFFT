@@ -1,26 +1,46 @@
-@defgroup cpp_api C++
+/**
+@defgroup cpp_api C++ API
 @brief C++ interface for SHAFFT.
 
-The C++ interface provides both a Plan class with member functions and
-procedural free functions. The portable complex types shafft::complexf 
-and shafft::complexd work with both FFTW and hipFFT backends.
+This group contains two subgroups:
+- @ref cpp_raii_api - RAII classes with automatic resource management (recommended)
+- @ref cpp_lowlevel_api - Free functions for C interoperability and advanced use
 
-@see shafft::Plan for the class-based interface.
-@see shafft.hpp for the complete C++ API.
+@see shafft.hpp for the complete API
 
-@defgroup c_api C
+@defgroup cpp_raii_api C++ RAII API
+@ingroup cpp_api
+@brief High-level RAII classes for distributed FFTs.
+
+Use these classes for most applications. They manage plan lifetime automatically
+and provide a clean object-oriented interface.
+
+@see shafft::FFT for the abstract base class
+@see shafft::FFTND for N-dimensional distributed FFTs
+@see shafft::FFT1D for 1D distributed FFTs
+
+@defgroup cpp_lowlevel_api C++ Free Function API
+@ingroup cpp_api
+@brief Free functions for C interoperability and advanced use.
+
+These functions mirror the C API but use C++ types. Use them when:
+- Interoperating with the C API
+- Managing plan lifetime manually
+- Needing finer control over buffer allocation
+
+For most applications, prefer the @ref cpp_raii_api instead.
+
+@defgroup c_api C API
 @brief C interface for SHAFFT.
 
-The C interface provides procedural functions for plan creation, execution,
-and resource management. Suitable for integration with C code or when
-object-oriented features are not needed.
+Procedural functions for plan creation, execution, and resource management.
 
-@see shafft.h for the complete C API.
+@see shafft.h for the complete API
 
-@defgroup fortran_api Fortran
+@defgroup fortran_api Fortran API
 @brief Fortran 2003 interface for SHAFFT.
 
-The Fortran interface wraps the C API with Fortran-native types and calling
-conventions using ISO_C_BINDING.
+Wraps the C API with Fortran-native types using ISO_C_BINDING.
 
-@see shafft.f03 for the complete Fortran API.
+@see shafft.f03 for the complete API
+*/

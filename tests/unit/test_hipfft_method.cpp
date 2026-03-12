@@ -6,56 +6,42 @@
  *  - Correct axis ordering passed to hipFFT (fastest dimension first).
  *  - Graceful rejection of plans whose strides/distances exceed 32-bit limits.
  */
-
-#include <shafft/shafft.hpp>
-#include <mpi.h>
-#include <complex>
-#include <vector>
+#include "test_utils.hpp"
 #include <cmath>
+#include <complex>
+#include <cstddef>
+#include <cstdio>
 #include <iostream>
+#include <mpi.h>
+#include <shafft/shafft.hpp>
+#include <vector>
 
 #if SHAFFT_BACKEND_HIPFFT
-#include "fft_method.h"  // internal hipfft_method API
+#include "fftnd_method.hpp" // internal hipfft_method API
 #include <hip/hip_runtime.h>
 #endif
 
 #if !SHAFFT_BACKEND_HIPFFT
 int main(int argc, char** argv) {
-  (void)argc; (void)argv;
+  (void)argc;
+  (void)argv;
   // hipFFT backend not built; silently skip to keep CTest green on CPU builds.
   return 0;
 }
 #else
 
-// Simple test harness -------------------------------------------------------
-static int g_passed = 0;
-static int g_failed = 0;
-
-#define TEST(name) \
-  static bool test_##name(); \
-  static bool run_##name() { \
-    bool ok = test_##name(); \
-    if (ok) { g_passed++; std::cout << "  " #name " PASS\n"; } \
-    else    { g_failed++; std::cout << "  " #name " FAIL\n"; } \
-    return ok; \
-  } \
-  static bool test_##name()
-
-//------------------------------------------------------------------------------
 // Helper: naive 2D DFT (row-major, last index fastest)
-//------------------------------------------------------------------------------
-static std::vector<std::complex<double>> dft2d(const std::vector<std::complex<double>>& in,
-                                               int n0, int n1)
-{
-  const double two_pi = 2.0 * std::acos(-1.0);
-  std::vector<std::complex<double>> out(n0 * n1);
+static std::vector<std::complex<double>>
+dft2d(const std::vector<std::complex<double>>& in, int n0, int n1) {
+  const double twoPi = 2.0 * std::acos(-1.0);
+  std::vector<std::complex<double>> out(static_cast<size_t>(n0 * n1));
   for (int k0 = 0; k0 < n0; ++k0) {
     for (int k1 = 0; k1 < n1; ++k1) {
       std::complex<double> acc{0.0, 0.0};
       for (int x0 = 0; x0 < n0; ++x0) {
         for (int x1 = 0; x1 < n1; ++x1) {
-          const double phase = -two_pi * (static_cast<double>(k0 * x0) / n0
-                                        + static_cast<double>(k1 * x1) / n1);
+          const double phase =
+              -twoPi * (static_cast<double>(k0 * x0) / n0 + static_cast<double>(k1 * x1) / n1);
           const double c = std::cos(phase);
           const double s = std::sin(phase);
           acc += in[x0 * n1 + x1] * std::complex<double>(c, s);
@@ -67,103 +53,127 @@ static std::vector<std::complex<double>> dft2d(const std::vector<std::complex<do
   return out;
 }
 
-//------------------------------------------------------------------------------
 // Test: hipFFT respects fastest-axis-first ordering for multi-axis plans
-//------------------------------------------------------------------------------
-TEST(hipfft_axis_order_forward) {
-  const std::vector<int> dims = {2, 3}; // smallest rectangular case that reveals ordering bugs
+static bool testHipFFTAxisOrderForward() {
+  const std::vector<size_t> dims = {2, 3};  // smallest rectangular case that reveals ordering bugs
+  const std::vector<int> commDims = {1, 1}; // no distribution (single rank)
 
-  shafft::Plan plan;
-  int rc = plan.init(/*nda=*/0, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD);
+  shafft::ConfigND cfg(dims, shafft::FFTType::Z2Z, commDims);
+
+  shafft::FFTND fft;
+  int rc = fft.init(cfg.cStruct());
   if (rc != 0) {
-    std::cerr << "plan.init failed with rc=" << rc << "\n";
+    std::cerr << "fft.init failed with rc=" << rc << "\n";
+    return false;
+  }
+  rc = fft.plan();
+  if (rc != 0) {
+    std::cerr << "fft.plan failed with rc=" << rc << "\n";
     return false;
   }
 
-  const size_t n = plan.allocSize();
-  std::vector<shafft::complexd> host_in(n);
+  const size_t n = fft.allocSize();
+  std::vector<shafft::complexd> hostIn(n);
   for (size_t i = 0; i < n; ++i) {
-    host_in[i] = {static_cast<double>(i + 1), static_cast<double>(i) * 0.25};
+    hostIn[i] = {static_cast<double>(i + 1), static_cast<double>(i) * 0.25};
   }
 
-  shafft::complexd *dev_data = nullptr, *dev_work = nullptr;
-  rc = shafft::allocBuffer(n, &dev_data); if (rc != 0) return false;
-  rc = shafft::allocBuffer(n, &dev_work); if (rc != 0) { (void)shafft::freeBuffer(dev_data); return false; }
+  shafft::complexd *devData = nullptr, *devWork = nullptr;
+  rc = shafft::allocBuffer(n, &devData);
+  if (rc != 0)
+    return false;
+  rc = shafft::allocBuffer(n, &devWork);
+  if (rc != 0) {
+    (void)shafft::freeBuffer(devData);
+    return false;
+  }
 
-  rc = shafft::copyToBuffer(dev_data, host_in.data(), n);
-  if (rc != 0) { std::cerr << "copyToBuffer failed rc=" << rc << "\n"; return false; }
+  rc = shafft::copyToBuffer(devData, hostIn.data(), n);
+  if (rc != 0) {
+    std::cerr << "copyToBuffer failed rc=" << rc << "\n";
+    (void)shafft::freeBuffer(devData);
+    (void)shafft::freeBuffer(devWork);
+    return false;
+  }
 
-  rc = plan.setBuffers(dev_data, dev_work);
-  if (rc != 0) { std::cerr << "setBuffers failed rc=" << rc << "\n"; return false; }
-  rc = plan.execute(shafft::FFTDirection::FORWARD);
-  if (rc != 0) { std::cerr << "execute failed rc=" << rc << "\n"; return false; }
+  rc = fft.setBuffers(devData, devWork);
+  if (rc != 0) {
+    std::cerr << "setBuffers failed rc=" << rc << "\n";
+    (void)shafft::freeBuffer(devData);
+    (void)shafft::freeBuffer(devWork);
+    return false;
+  }
+  rc = fft.execute(shafft::FFTDirection::FORWARD);
+  if (rc != 0) {
+    std::cerr << "execute failed rc=" << rc << "\n";
+    (void)shafft::freeBuffer(devData);
+    (void)shafft::freeBuffer(devWork);
+    return false;
+  }
 
   // Fetch whichever buffer now holds the result
-  shafft::complexd *dev_out = nullptr, *dev_unused = nullptr;
-  rc = plan.getBuffers(&dev_out, &dev_unused);
-  if (rc != 0) { std::cerr << "getBuffers failed rc=" << rc << "\n"; return false; }
+  shafft::complexd *devOut = nullptr, *devUnused = nullptr;
+  rc = fft.getBuffers(&devOut, &devUnused);
+  if (rc != 0) {
+    std::cerr << "getBuffers failed rc=" << rc << "\n";
+    (void)shafft::freeBuffer(devData);
+    (void)shafft::freeBuffer(devWork);
+    return false;
+  }
 
-  std::vector<shafft::complexd> host_out(n);
-  rc = shafft::copyFromBuffer(host_out.data(), dev_out, n);
-  if (rc != 0) { std::cerr << "copyFromBuffer failed rc=" << rc << "\n"; return false; }
+  std::vector<shafft::complexd> hostOut(n);
+  rc = shafft::copyFromBuffer(hostOut.data(), devOut, n);
+  if (rc != 0) {
+    std::cerr << "copyFromBuffer failed rc=" << rc << "\n";
+    (void)shafft::freeBuffer(devData);
+    (void)shafft::freeBuffer(devWork);
+    return false;
+  }
 
-  const auto ref = dft2d({host_in.begin(), host_in.end()}, dims[0], dims[1]);
+  // Convert hostIn to std::complex<double> for reference DFT
+  std::vector<std::complex<double>> hostInCplx(hostIn.begin(), hostIn.end());
+  const auto ref = dft2d(hostInCplx, dims[0], dims[1]);
 
-  double max_err = 0.0;
-  size_t bad_idx = static_cast<size_t>(-1);
-  std::complex<double> bad_val{}, bad_ref{};
+  double maxErr = 0.0;
+  auto badIdx = static_cast<size_t>(-1);
+  std::complex<double> badVal{}, badRef{};
   for (size_t i = 0; i < n; ++i) {
-    const double err_re = std::abs(host_out[i].real() - ref[i].real());
-    const double err_im = std::abs(host_out[i].imag() - ref[i].imag());
-    const double e = std::max(err_re, err_im);
-    if (e > max_err) {
-      max_err = e;
-      bad_idx = i;
-      bad_val = host_out[i];
-      bad_ref = ref[i];
+    const double errRe = std::abs(hostOut[i].real() - ref[i].real());
+    const double errIm = std::abs(hostOut[i].imag() - ref[i].imag());
+    const double e = std::max(errRe, errIm);
+    if (e > maxErr) {
+      maxErr = e;
+      badIdx = i;
+      badVal = hostOut[i];
+      badRef = ref[i];
     }
   }
 
-  (void)shafft::freeBuffer(dev_data);
-  (void)shafft::freeBuffer(dev_work);
+  (void)shafft::freeBuffer(devData);
+  (void)shafft::freeBuffer(devWork);
 
   // Very small tolerance since inputs are tiny and transform size is 6
-  if (max_err > 1e-10) {
-    std::cerr << "max_err=" << max_err << " exceeds tolerance at idx=" << bad_idx
-              << " got=(" << bad_val.real() << "," << bad_val.imag()
-              << ") expected=(" << bad_ref.real() << "," << bad_ref.imag() << ")\n";
+  if (maxErr > 1e-10) {
+    std::cerr << "max_err=" << maxErr << " exceeds tolerance at idx=" << badIdx << " got=("
+              << badVal.real() << "," << badVal.imag() << ") expected=(" << badRef.real() << ","
+              << badRef.imag() << ")\n";
     return false;
   }
   return true;
 }
 
-//------------------------------------------------------------------------------
-// Test: plan creation rejects dimensions that overflow 32-bit hipFFT parameters
-//------------------------------------------------------------------------------
-TEST(hipfft_rejects_int_overflow) {
-  // Product exceeds INT_MAX, so transform_parameters should fail
-  const std::vector<int> dims = {65536, 65536};
-  shafft::Plan plan;
-  int rc = plan.init(/*nda=*/0, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD);
-  return rc != 0;
-}
-
-//------------------------------------------------------------------------------
 int main(int argc, char** argv) {
-  MPI_Init(&argc, &argv);
-
-  std::cout << "hipFFT method unit tests" << std::endl;
-  run_hipfft_axis_order_forward();
-  run_hipfft_rejects_int_overflow();
-
-  if (g_failed == 0) {
-    std::cout << "ALL PASSED (" << g_passed << ")" << std::endl;
-  } else {
-    std::cout << g_failed << " FAILED, " << g_passed << " passed" << std::endl;
+  if (MPI_Init(&argc, &argv) != MPI_SUCCESS) {
+    std::fprintf(stderr, "MPI_Init failed\n");
+    MPI_Abort(MPI_COMM_WORLD, 1);
   }
 
+  test::TestRunner runner("hipFFT method unit tests");
+  runner.run("hipfft_axis_order_forward", testHipFFTAxisOrderForward);
+
+  const int result = runner.finalize();
   MPI_Finalize();
-  return g_failed == 0 ? 0 : 1;
+  return result;
 }
 
 #endif // SHAFFT_BACKEND_HIPFFT

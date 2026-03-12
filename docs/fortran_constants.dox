@@ -1,79 +1,88 @@
+/**
 @defgroup fortran_constants Fortran Constants
 @ingroup fortran_api
 @brief Integer parameter constants for the Fortran API.
 
-These constants are defined in the @c shafft module as @c integer(c_int)
-parameters and should be used with the corresponding Fortran subroutines.
+Defined in the `shafft` module as `integer(c_int)` parameters.
 
-@section fft_type_constants FFT Type Constants
+## FFT Type
 
-| Constant     | Value | Description                              |
-|--------------|-------|------------------------------------------|
-| @c SHAFFT_C2C | 0     | Single-precision complex-to-complex FFT  |
-| @c SHAFFT_Z2Z | 1     | Double-precision complex-to-complex FFT  |
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `SHAFFT_C2C` | 0 | Single precision complex-to-complex |
+| `SHAFFT_Z2Z` | 1 | Double precision complex-to-complex |
 
-@section direction_constants Transform Direction Constants
+## Transform Direction
 
-| Constant          | Value | Description                |
-|-------------------|-------|----------------------------|
-| @c SHAFFT_FORWARD  | 0     | Forward FFT transform      |
-| @c SHAFFT_BACKWARD | 1     | Backward (inverse) FFT     |
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `SHAFFT_FORWARD` | 0 | Forward FFT |
+| `SHAFFT_BACKWARD` | 1 | Backward FFT |
 
-@section layout_constants Tensor Layout Constants
+## Tensor Layout
 
-Used with shafftGetLayout() and shafftGetAxes() to query tensor layout
-at different stages of the transform.
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `SHAFFT_TENSOR_LAYOUT_CURRENT` | 0 | Current runtime layout |
+| `SHAFFT_TENSOR_LAYOUT_INITIAL` | 1 | Layout before transforms |
+| `SHAFFT_TENSOR_LAYOUT_REDISTRIBUTED` | 2 | User-visible redistributed layout |
 
-| Constant                         | Value | Description                                    |
-|----------------------------------|-------|------------------------------------------------|
-| @c SHAFFT_TENSOR_LAYOUT_CURRENT     | 0     | Current layout (initial or transformed)        |
-| @c SHAFFT_TENSOR_LAYOUT_INITIAL     | 1     | Layout before any transforms                   |
-| @c SHAFFT_TENSOR_LAYOUT_TRANSFORMED | 2     | Layout after forward/backward transform        |
+## Transform Layout Policy (N-D Planning)
 
-@section errsrc_constants Error Source Constants
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `SHAFFT_LAYOUT_REDISTRIBUTED` | 0 | Keep post-forward redistributed layout |
+| `SHAFFT_LAYOUT_INITIAL` | 1 | Restore initial layout after forward |
 
-Returned by @c shafftLastErrorSource() to indicate which subsystem raised
-the last error.
+## Decomposition Strategy
 
-| Constant              | Value | Description                |
-|-----------------------|-------|----------------------------|
-| @c SHAFFT_ERRSRC_NONE   | 0     | No error / SHAFFT internal |
-| @c SHAFFT_ERRSRC_MPI    | 1     | MPI library error         |
-| @c SHAFFT_ERRSRC_HIP    | 2     | HIP runtime error         |
-| @c SHAFFT_ERRSRC_HIPFFT | 3     | hipFFT library error      |
-| @c SHAFFT_ERRSRC_FFTW   | 4     | FFTW library error        |
-| @c SHAFFT_ERRSRC_SYSTEM | 5     | OS / allocation error     |
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `SHAFFT_MAXIMIZE_NDA` | 0 | Maximize distributed axes |
+| `SHAFFT_MINIMIZE_NDA` | 1 | Minimize distributed axes |
 
-@section status_constants Status Code Constants
+## Error Source Codes
 
-Returned by all Fortran wrappers through the required @c ierr argument.
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `SHAFFT_ERRSRC_NONE` | 0 | No error or SHAFFT-internal error |
+| `SHAFFT_ERRSRC_MPI` | 1 | MPI library error |
+| `SHAFFT_ERRSRC_HIP` | 2 | HIP runtime error |
+| `SHAFFT_ERRSRC_HIPFFT` | 3 | hipFFT library error |
+| `SHAFFT_ERRSRC_FFTW` | 4 | FFTW library error |
+| `SHAFFT_ERRSRC_SYSTEM` | 5 | OS / allocation errors |
 
-| Constant                     | Value | Description                         |
-|------------------------------|-------|-------------------------------------|
-| @c SHAFFT_SUCCESS              | 0     | Success                             |
-| @c SHAFFT_ERR_NULLPTR          | 1     | Null pointer argument               |
-| @c SHAFFT_ERR_INVALID_COMM     | 2     | Invalid MPI communicator            |
-| @c SHAFFT_ERR_NO_BUFFER        | 3     | Required data/work buffer missing   |
-| @c SHAFFT_ERR_PLAN_NOT_INIT    | 4     | Plan or subplan not initialized     |
-| @c SHAFFT_ERR_INVALID_DIM      | 5     | Invalid dimension/rank/size         |
-| @c SHAFFT_ERR_DIM_MISMATCH     | 6     | Dimension mismatch between arrays   |
-| @c SHAFFT_ERR_INVALID_DECOMP   | 7     | Invalid/unsupported decomposition   |
-| @c SHAFFT_ERR_INVALID_FFTTYPE  | 8     | Unsupported FFT type                |
-| @c SHAFFT_ERR_ALLOC            | 9     | Memory allocation failure           |
-| @c SHAFFT_ERR_BACKEND          | 10    | FFT backend failure (FFTW/hipFFT)   |
-| @c SHAFFT_ERR_MPI              | 11    | MPI failure                         |
-| @c SHAFFT_ERR_INTERNAL         | 12    | Uncategorized internal error        |
+## Status Codes
 
-@par Example Usage:
+| Constant | Value | Description |
+|----------|-------|-------------|
+| `SHAFFT_SUCCESS` | 0 | Success |
+| `SHAFFT_ERR_NULLPTR` | 1 | Null pointer |
+| `SHAFFT_ERR_INVALID_COMM` | 2 | Invalid MPI communicator |
+| `SHAFFT_ERR_NO_BUFFER` | 3 | Missing buffer |
+| `SHAFFT_ERR_PLAN_NOT_INIT` | 4 | Plan not initialized |
+| `SHAFFT_ERR_INVALID_DIM` | 5 | Invalid dimension |
+| `SHAFFT_ERR_DIM_MISMATCH` | 6 | Dimension mismatch |
+| `SHAFFT_ERR_INVALID_DECOMP` | 7 | Invalid decomposition |
+| `SHAFFT_ERR_INVALID_FFTTYPE` | 8 | Unsupported FFT type |
+| `SHAFFT_ERR_ALLOC` | 9 | Allocation failure |
+| `SHAFFT_ERR_BACKEND` | 10 | Backend failure |
+| `SHAFFT_ERR_MPI` | 11 | MPI failure |
+| `SHAFFT_ERR_INVALID_LAYOUT` | 12 | Layout mismatch |
+| `SHAFFT_ERR_SIZE_OVERFLOW` | 13 | Size exceeds INT_MAX |
+| `SHAFFT_ERR_NOT_IMPL` | 14 | Not implemented |
+| `SHAFFT_ERR_INVALID_STATE` | 15 | Invalid plan state |
+| `SHAFFT_ERR_INTERNAL` | 16 | Internal error |
+
+@par Example:
 @code{.f90}
 use shafft
 
-! Create a double-precision plan
-call shafftPlanNDA(plan, ndim, nda, dims, SHAFFT_Z2Z, MPI_COMM_WORLD)
-
-! Execute forward transform
-call shafftExecute(plan, SHAFFT_FORWARD)
-
-! Query transformed layout
-call shafftGetLayout(plan, subsize, offset, SHAFFT_TENSOR_LAYOUT_TRANSFORMED)
+call shafftNDCreate(plan, ierr)
+call shafftNDInit(plan, commDims, dims, SHAFFT_Z2Z, MPI_COMM_WORLD, &
+                  SHAFFT_LAYOUT_REDISTRIBUTED, ierr)
+call shafftPlan(plan, ierr)
+call shafftExecute(plan, SHAFFT_FORWARD, ierr)
+call shafftGetLayout(plan, subsize, offset, SHAFFT_TENSOR_LAYOUT_REDISTRIBUTED, ierr)
 @endcode
+*/
