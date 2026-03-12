@@ -54,35 +54,74 @@ int fft1dQueryLayout(
   ensureFFTwMpiInit();
 
   ptrdiff_t localNi, localStarti;
-  ptrdiff_t localNo, localStarto; // Output layout
+  ptrdiff_t localNo, localStarto;
 
-  // FFTW-MPI uses ptrdiff_t for sizes
+  // First query on the original communicator to find inactive ranks.
   ptrdiff_t alloc = fftw_mpi_local_size_1d(
       static_cast<ptrdiff_t>(globalN),
       comm,
-      FFTW_FORWARD, // Direction doesn't affect layout for 1D DFT
-      0,            // Consecutive output
+      FFTW_FORWARD,
+      0,
       &localNi,
       &localStarti,
-      &localNo, // Output layout, can differ for prime or prime-factorizable sizes
+      &localNo,
       &localStarto);
 
-  localN = static_cast<size_t>(localNi);
-  localStart = static_cast<size_t>(localStarti);
-  // Mirror ND behavior: inactive ranks (localN == 0) report zero allocSize.
-  // The caller creates an active subcommunicator that excludes these ranks,
-  // and FFTW plans are created on that subcommunicator so all participating
-  // ranks call MPI collectives consistently.
-  localAllocSize = (localN == 0) ? 0 : static_cast<size_t>(alloc);
+  // If this rank has no local elements it is inactive.
+  if (localNi == 0) {
+    localN = 0;
+    localStart = 0;
+    localAllocSize = 0;
+    localNTrans = 0;
+    localStartTrans = 0;
 
-  localNTrans = static_cast<size_t>(localNo);
-  localStartTrans = static_cast<size_t>(localStarto);
+    // MPI_Comm_split is collective -- inactive ranks must participate.
+    int rank = 0;
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm subcomm = MPI_COMM_NULL;
+    MPI_Comm_split(comm, MPI_UNDEFINED, rank, &subcomm);
+    // subcomm is MPI_COMM_NULL for this rank; nothing to free.
+    return 0;
+  }
+
+  // Create a temporary active subcommunicator (only ranks with localN > 0).
+  // Re-query FFTW on it: the Cooley-Tukey / Bluestein redistribution may
+  // require a larger allocSize when fewer ranks participate.
+  int rank = 0;
+  MPI_Comm_rank(comm, &rank);
+  MPI_Comm subcomm = MPI_COMM_NULL;
+  int splitRc = MPI_Comm_split(comm, 0, rank, &subcomm);
+  if (splitRc != MPI_SUCCESS) {
+    return static_cast<int>(Status::ERR_MPI);
+  }
+
+  ptrdiff_t subNi, subStarti, subNo, subStarto;
+  ptrdiff_t subAlloc = fftw_mpi_local_size_1d(
+      static_cast<ptrdiff_t>(globalN),
+      subcomm,
+      FFTW_FORWARD,
+      0,
+      &subNi,
+      &subStarti,
+      &subNo,
+      &subStarto);
+  MPI_Comm_free(&subcomm);
+
+  localN = static_cast<size_t>(subNi);
+  localStart = static_cast<size_t>(subStarti);
+  localAllocSize = static_cast<size_t>(subAlloc);
+  localNTrans = static_cast<size_t>(subNo);
+  localStartTrans = static_cast<size_t>(subStarto);
 
   if (diagEnabled()) {
     dbgHdr(comm, "fft1dQueryLayout");
-    std::cerr << "globalN=" << globalN << " localN=" << localN << " localStart=" << localStart
+    std::cerr << "globalN=" << globalN
+              << " localN=" << localN
+              << " localStart=" << localStart
               << " localAllocSize=" << localAllocSize
-              << " localNTrans=" << localNTrans << " localStartTrans=" << localStartTrans << "\n";
+              << " localNTrans=" << localNTrans
+              << " localStartTrans=" << localStartTrans
+              << "\n";
   }
 
   return 0;

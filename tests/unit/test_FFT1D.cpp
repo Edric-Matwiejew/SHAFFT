@@ -480,7 +480,7 @@ static bool test_FFT1D_is_active() {
   bool active = fft.isActive();
   size_t myLocalN = fft.localSize();
 
-  // Accumulate pass/fail locally — never return before the collective below.
+  // Accumulate pass/fail locally -- never return before the collective below.
   bool localPass = true;
 
   // Active ranks must have non-zero localN; inactive ones must have zero.
