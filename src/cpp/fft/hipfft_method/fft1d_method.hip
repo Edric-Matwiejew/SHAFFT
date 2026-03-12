@@ -340,26 +340,74 @@ int fft1dQueryLayout(size_t globalN,
   MPI_Comm_rank(comm, &rank);
   MPI_Comm_size(comm, &numRanks);
 
+  // First query on world comm to identify inactive ranks.
   FFT1DPathConfig pathConfig =
       selectPath(globalN, static_cast<size_t>(numRanks), config.tau, config.allowPadding);
   size_t L = pathConfig.localSize;
 
-  computeBlockDistributionWithL(globalN, L, rank, localN, localStart);
-  // All ranks must allocate L elements: the distributed FFT algorithm
-  // (both Cooley-Tukey and Bluestein) requires every rank to participate
-  // in MPI_Alltoall with L-sized buffers, even if localN == 0.
-  localAllocSize = L;
+  size_t initLocalN, initLocalStart;
+  computeBlockDistributionWithL(globalN, L, rank, initLocalN, initLocalStart);
+
+  // Rank is inactive when the initial block is empty.
+  if (initLocalN == 0) {
+    localN = 0;
+    localStart = 0;
+    localAllocSize = 0;
+    localNTrans = 0;
+    localStartTrans = 0;
+
+    // MPI_Comm_split is collective; inactive ranks must enter it.
+    MPI_Comm subcomm = MPI_COMM_NULL;
+    int splitRc = MPI_Comm_split(comm, MPI_UNDEFINED, rank, &subcomm);
+    if (splitRc != MPI_SUCCESS) {
+      return SHAFFT_STATUS(SHAFFT_ERR_MPI);
+    }
+
+    if (diagEnabled()) {
+      dbgHdr(comm, "fft1dQueryLayout");
+      std::cerr << "globalN=" << globalN
+                << " INACTIVE rank (localN=0 on original "
+                << numRanks << "-rank comm)\n";
+    }
+
+    return SHAFFT_STATUS(SHAFFT_SUCCESS);
+  }
+
+  // Re-query on an active-rank subcommunicator.
+  MPI_Comm subcomm = MPI_COMM_NULL;
+  int splitRc = MPI_Comm_split(comm, 0, rank, &subcomm);
+  if (splitRc != MPI_SUCCESS) {
+    return SHAFFT_STATUS(SHAFFT_ERR_MPI);
+  }
+
+  int subRank, subNumRanks;
+  MPI_Comm_rank(subcomm, &subRank);
+  MPI_Comm_size(subcomm, &subNumRanks);
+
+  FFT1DPathConfig subPathConfig =
+      selectPath(globalN, static_cast<size_t>(subNumRanks),
+                 config.tau, config.allowPadding);
+  size_t subL = subPathConfig.localSize;
+
+  computeBlockDistributionWithL(globalN, subL, subRank, localN, localStart);
+  localAllocSize = subL;
 
   // hipFFT uses symmetric layout: output distribution matches input.
   localNTrans = localN;
   localStartTrans = localStart;
 
+  MPI_Comm_free(&subcomm);
+
   if (diagEnabled()) {
     dbgHdr(comm, "fft1dQueryLayout");
-    std::cerr << "globalN=" << globalN << " path=" << pathToString(pathConfig.path)
+    std::cerr << "globalN=" << globalN
+              << " path=" << pathToString(subPathConfig.path)
               << " localN=" << localN << " localStart=" << localStart
               << " localAllocSize=" << localAllocSize
-              << " localNTrans=" << localNTrans << " localStartTrans=" << localStartTrans << "\n";
+              << " localNTrans=" << localNTrans
+              << " localStartTrans=" << localStartTrans
+              << " (active " << subNumRanks << " of "
+              << numRanks << " ranks)\n";
   }
 
   return SHAFFT_STATUS(SHAFFT_SUCCESS);

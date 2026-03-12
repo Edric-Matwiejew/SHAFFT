@@ -610,8 +610,8 @@ int config1DResolve(shafft_1d_config_t* cfg) noexcept {
 
     cfg->allocElements = localAllocSize;
 
-    // Activity
-    cfg->isActive = (localN > 0) ? 1 : 0;
+    // Activity follows allocation, not localN.
+    cfg->isActive = (localAllocSize > 0) ? 1 : 0;
 
     // Active rank/size
     int worldRank = 0, worldSize = 0;

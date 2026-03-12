@@ -183,8 +183,9 @@ static bool test_configuration1d_layout_correctness() {
     }
 
 #if SHAFFT_BACKEND_HIPFFT
-    // hipFFT L-based block layout: localStart = min(rank*L, N),
-    // localN = min(L, max(N - rank*L, 0))
+    // hipFFT with subcomm: inactive ranks have allocSize=0, active
+    // ranks share a common L from the re-queried subcomm.  Verify
+    // the L-based block layout among active ranks only.
     shafft::FFT1D fft;
     rc = fft.init(N, localN, localStart, shafft::FFTType::C2C, MPI_COMM_WORLD);
     if (rc != 0)
@@ -192,48 +193,79 @@ static bool test_configuration1d_layout_correctness() {
     rc = fft.plan();
     if (rc != 0)
       return false;
-    size_t L = fft.allocSize(); // L = fftLength/P
+    size_t myAllocSize = fft.allocSize();
 
-    // Verify: localStart should follow block layout: min(rank * L, N)
+    // Gather allocSize from all ranks
+    std::vector<size_t> all_alloc(worldSize);
+    MPI_Allgather(&myAllocSize,
+                  1,
+                  MPI_UNSIGNED_LONG,
+                  all_alloc.data(),
+                  1,
+                  MPI_UNSIGNED_LONG,
+                  MPI_COMM_WORLD);
+
+    // Collect active ranks (those with allocSize > 0)
+    size_t L = 0;
+    int activeCount = 0;
     for (int i = 0; i < worldSize; ++i) {
-      size_t expected_start = std::min(static_cast<size_t>(i) * L, N);
-
-      if (all_local_start[i] != expected_start) {
-        if (worldRank == 0) {
-          std::printf("FAIL: N=%zu, rank %d localStart=%zu (expected min(%d*%zu,%zu)=%zu)\n",
-                      N,
-                      i,
-                      all_local_start[i],
-                      i,
-                      L,
-                      N,
-                      expected_start);
+      if (all_alloc[i] > 0) {
+        if (L == 0)
+          L = all_alloc[i];
+        if (all_alloc[i] != L) {
+          if (worldRank == 0) {
+            std::printf(
+                "FAIL: N=%zu, rank %d allocSize=%zu != L=%zu\n",
+                N, i, all_alloc[i], L);
+          }
+          return false;
         }
-        return false;
+        ++activeCount;
+      } else {
+        // Inactive rank must have localN==0
+        if (all_local_n[i] != 0) {
+          if (worldRank == 0) {
+            std::printf(
+                "FAIL: N=%zu, rank %d allocSize=0 but localN=%zu\n",
+                N, i, all_local_n[i]);
+          }
+          return false;
+        }
       }
     }
 
-    // Verify: localN should follow formula: min(L, max(N - rank*L, 0))
+    // Verify L-based block layout among active ranks
+    int activeIdx = 0;
     for (int i = 0; i < worldSize; ++i) {
-      size_t rank_offset = static_cast<size_t>(i) * L;
-      size_t expected_local_n;
-      if (rank_offset >= N) {
-        expected_local_n = 0;
-      } else {
-        size_t remaining = N - rank_offset;
-        expected_local_n = std::min(remaining, L);
-      }
-
-      if (all_local_n[i] != expected_local_n) {
+      if (all_alloc[i] == 0)
+        continue;
+      size_t expected_start =
+          std::min(static_cast<size_t>(activeIdx) * L, N);
+      if (all_local_start[i] != expected_start) {
         if (worldRank == 0) {
-          std::printf("FAIL: N=%zu, rank %d localN=%zu (expected %zu)\n",
-                      N,
-                      i,
-                      all_local_n[i],
-                      expected_local_n);
+          std::printf(
+              "FAIL: N=%zu, rank %d (active %d) "
+              "localStart=%zu (expected %zu)\n",
+              N, i, activeIdx,
+              all_local_start[i], expected_start);
         }
         return false;
       }
+      size_t rank_offset = static_cast<size_t>(activeIdx) * L;
+      size_t expected_local_n = (rank_offset >= N)
+          ? 0
+          : std::min(N - rank_offset, L);
+      if (all_local_n[i] != expected_local_n) {
+        if (worldRank == 0) {
+          std::printf(
+              "FAIL: N=%zu, rank %d (active %d) "
+              "localN=%zu (expected %zu)\n",
+              N, i, activeIdx,
+              all_local_n[i], expected_local_n);
+        }
+        return false;
+      }
+      ++activeIdx;
     }
 #endif // SHAFFT_BACKEND_HIPFFT
   }
@@ -274,14 +306,26 @@ static bool test_configuration1d_alloc_size() {
       return false;
     }
 
-    // For hipFFT, verify allocSize is padded correctly for Cooley-Tukey
+    // For hipFFT, allocSize (L) is computed over active ranks.
 #if SHAFFT_BACKEND_HIPFFT
-    // allocSize should be divisible by numRanks (for chunk-based algorithm)
-    if (allocSize % static_cast<size_t>(worldSize) != 0) {
-      if (worldRank == 0) {
-        std::printf("FAIL: N=%zu, allocSize=%zu not divisible by %d\n", N, allocSize, worldSize);
+    // Collective: all ranks must participate.
+    int localActive = (allocSize > 0) ? 1 : 0;
+    int totalActiveRanks = 0;
+    MPI_Allreduce(
+        &localActive, &totalActiveRanks, 1, MPI_INT,
+        MPI_SUM, MPI_COMM_WORLD);
+
+    if (allocSize > 0) {
+      // allocSize (L) must be divisible by the number of active ranks
+      if (allocSize % static_cast<size_t>(totalActiveRanks) != 0) {
+        if (worldRank == 0) {
+          std::printf(
+              "FAIL: N=%zu, allocSize=%zu not divisible "
+              "by activeRanks=%d\n",
+              N, allocSize, totalActiveRanks);
+        }
+        return false;
       }
-      return false;
     }
 #endif
   }
@@ -458,9 +502,8 @@ static bool test_FFT1D_getaxes() {
 
 // Test: FFT1D isActive
 static bool test_FFT1D_is_active() {
-  int worldSize, worldRank;
+  int worldSize;
   MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
-  MPI_Comm_rank(MPI_COMM_WORLD, &worldRank);
 
   size_t N = 32;
   size_t localN, localStart;
@@ -478,15 +521,18 @@ static bool test_FFT1D_is_active() {
     return false;
 
   bool active = fft.isActive();
-  size_t myLocalN = fft.localSize();
+  size_t myAllocSize = fft.allocSize();
 
   // Accumulate pass/fail locally -- never return before the collective below.
   bool localPass = true;
 
-  // Active ranks must have non-zero localN; inactive ones must have zero.
-  if (active && myLocalN == 0)
+  // Active ranks must have non-zero allocSize; inactive ones must have zero.
+  // Note: for hipFFT a rank can be active with localN==0 because the
+  // distributed algorithm (Bluestein / Cooley-Tukey) requires every rank to
+  // participate in MPI_Alltoall with L-sized buffers.
+  if (active && myAllocSize == 0)
     localPass = false;
-  if (!active && myLocalN != 0)
+  if (!active && myAllocSize != 0)
     localPass = false;
 
   // Count active ranks across all processes.
@@ -769,17 +815,91 @@ static bool test_hipfft_equal_alloc_size() {
                MPI_COMM_WORLD);
 
     if (worldRank == 0) {
-      for (int r = 1; r < worldSize; r++) {
-        if (allAllocSize[r] != allAllocSize[0]) {
-          std::printf("FAIL: N=%zu, rank %d allocSize=%zu != rank 0 allocSize=%zu\n",
-                      N,
-                      r,
-                      allAllocSize[r],
-                      allAllocSize[0]);
-          return false;
+      // With the subcomm approach, active ranks share a common L
+      // while inactive ranks have allocSize=0.  Check that all
+      // non-zero allocSizes are equal.
+      size_t activeL = 0;
+      for (int r = 0; r < worldSize; r++) {
+        if (allAllocSize[r] > 0) {
+          if (activeL == 0)
+            activeL = allAllocSize[r];
+          if (allAllocSize[r] != activeL) {
+            std::printf(
+                "FAIL: N=%zu, rank %d allocSize=%zu "
+                "!= activeL=%zu\n",
+                N, r, allAllocSize[r], activeL);
+            return false;
+          }
         }
       }
     }
+  }
+
+  return true;
+}
+
+// Test: activity follows allocSize, not localN.
+static bool test_hipfft_active_zero_localn_semantics() {
+  int worldSize, worldRank;
+  MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
+  MPI_Comm_rank(MPI_COMM_WORLD, &worldRank);
+
+  // Needs at least 3 ranks.
+  if (worldSize < 3)
+    return true;
+
+  bool localOk = true;
+  bool sawZeroLocalNActive = false;
+
+  // Sizes that exercise allocSize>0 with localN==0 on active ranks.
+  std::vector<size_t> test_sizes = {5, 7, 10, 13, 17, 31};
+
+  for (size_t N : test_sizes) {
+    size_t localN = 0, localStart = 0;
+    int rc = shafft::configuration1D(N, localN, localStart, shafft::FFTType::C2C, MPI_COMM_WORLD);
+    if (rc != 0) {
+      localOk = false;
+      continue;
+    }
+
+    shafft::FFT1D fft;
+    rc = fft.init(N, localN, localStart, shafft::FFTType::C2C, MPI_COMM_WORLD);
+    if (rc != 0) {
+      localOk = false;
+      continue;
+    }
+
+    size_t allocSize = fft.allocSize();
+    size_t reportedLocalN = fft.localSize();
+    bool active = fft.isActive();
+
+    if ((allocSize > 0) != active)
+      localOk = false;
+
+    if (allocSize == 0 && reportedLocalN != 0)
+      localOk = false;
+
+    if (allocSize > 0 && reportedLocalN == 0) {
+      sawZeroLocalNActive = true;
+      if (!active)
+        localOk = false;
+    }
+  }
+
+  int localFail = localOk ? 0 : 1;
+  int globalFail = 0;
+  MPI_Allreduce(&localFail, &globalFail, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+  if (globalFail)
+    return false;
+
+  int localSaw = sawZeroLocalNActive ? 1 : 0;
+  int globalSaw = 0;
+  MPI_Allreduce(&localSaw, &globalSaw, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+  if (!globalSaw) {
+    if (worldRank == 0) {
+      std::printf("FAIL: did not observe allocSize>0 with localN==0 on %d ranks\n", worldSize);
+    }
+    return false;
   }
 
   return true;
@@ -791,19 +911,13 @@ static bool test_hipfft_bluestein_alloc_size_formula() {
   MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
   MPI_Comm_rank(MPI_COMM_WORLD, &worldRank);
 
-  size_t P = static_cast<size_t>(worldSize);
-  size_t P2 = P * P;
-
-  // Use sizes that don't divide by P^2 to ensure Bluestein path
+  // M and L depend on active-rank count, not world size.
   std::vector<size_t> test_sizes = {7, 10, 13, 31, 97, 127};
 
   for (size_t N : test_sizes) {
-    // Skip sizes that would use Cooley-Tukey (N % P^2 == 0)
-    if (N % P2 == 0)
-      continue;
-
     size_t localN = 0, localStart = 0;
-    int rc = shafft::configuration1D(N, localN, localStart, shafft::FFTType::C2C, MPI_COMM_WORLD);
+    int rc = shafft::configuration1D(
+        N, localN, localStart, shafft::FFTType::C2C, MPI_COMM_WORLD);
     if (rc != 0)
       return false;
 
@@ -817,6 +931,26 @@ static bool test_hipfft_bluestein_alloc_size_formula() {
 
     size_t allocSize = fft.allocSize();
 
+    // Count active ranks
+    int localActive = (allocSize > 0) ? 1 : 0;
+    int activeRanks = 0;
+    MPI_Allreduce(
+        &localActive, &activeRanks, 1, MPI_INT,
+        MPI_SUM, MPI_COMM_WORLD);
+
+    // Inactive ranks have allocSize=0, nothing to check
+    if (allocSize == 0)
+      continue;
+
+    size_t P = static_cast<size_t>(activeRanks);
+    size_t P2 = P * P;
+
+    // Skip sizes that use Cooley-Tukey on the active subcomm
+    // (the path selection depends on the active P, not worldSize)
+    size_t Nprime = ((N + P2 - 1) / P2) * P2;
+    if (Nprime == N)
+      continue;
+
     // Expected M for Bluestein: M = ceil((2N-1)/P^2)*P^2
     size_t M0 = 2 * N - 1;
     size_t M = ((M0 + P2 - 1) / P2) * P2;
@@ -824,11 +958,11 @@ static bool test_hipfft_bluestein_alloc_size_formula() {
 
     if (allocSize != expectedL) {
       if (worldRank == 0) {
-        std::printf("FAIL (Bluestein allocSize): N=%zu, allocSize=%zu, expected M/P=%zu (M=%zu)\n",
-                    N,
-                    allocSize,
-                    expectedL,
-                    M);
+        std::printf(
+            "FAIL (Bluestein allocSize): N=%zu, "
+            "allocSize=%zu, expected M/P=%zu "
+            "(M=%zu, activeP=%zu)\n",
+            N, allocSize, expectedL, M, P);
       }
       return false;
     }
@@ -852,47 +986,48 @@ static bool test_hipfft_bluestein_local_n_formula_p4() {
   }
 
   size_t N = 10;
-  // With Bluestein (default): M = ceil((2*10-1)/16)*16 = ceil(19/16)*16 = 32
-  // L_bluestein = M/P = 32/4 = 8 (internal allocation)
-  // But localN reflects actual data: distributed evenly with possible remainder
+  // With subcomm: initial query on 4 ranks gives Bluestein L=8,
+  // so rank 3 (offset=24 >= 10) has localN=0 and is excluded.
+  // Active subcomm has 3 ranks, which re-queries with P=3.
 
   size_t localN = 0, localStart = 0;
-  int rc = shafft::configuration1D(N, localN, localStart, shafft::FFTType::C2C, MPI_COMM_WORLD);
+  int rc = shafft::configuration1D(
+      N, localN, localStart, shafft::FFTType::C2C, MPI_COMM_WORLD);
   if (rc != 0)
     return false;
 
   // Gather all values
   std::vector<size_t> allLocalN(worldSize), allLocalStart(worldSize);
   MPI_Gather(
-      &localN, 1, MPI_UNSIGNED_LONG, allLocalN.data(), 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
-  MPI_Gather(&localStart,
-             1,
-             MPI_UNSIGNED_LONG,
-             allLocalStart.data(),
-             1,
-             MPI_UNSIGNED_LONG,
-             0,
-             MPI_COMM_WORLD);
+      &localN, 1, MPI_UNSIGNED_LONG,
+      allLocalN.data(), 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
+  MPI_Gather(
+      &localStart, 1, MPI_UNSIGNED_LONG,
+      allLocalStart.data(), 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
 
   if (worldRank == 0) {
-    // Verify sum equals N exactly (Bluestein property)
+    // Verify sum equals N exactly (only active ranks contribute)
     size_t totalN = 0;
-    for (int r = 0; r < worldSize; r++) {
+    for (int r = 0; r < worldSize; r++)
       totalN += allLocalN[r];
-    }
     if (totalN != N) {
-      std::printf("FAIL: N=10, P=4 (Bluestein), sum(localN)=%zu != N=%zu\n", totalN, N);
+      std::printf(
+          "FAIL: N=10, P=4 (Bluestein), "
+          "sum(localN)=%zu != N=%zu\n",
+          totalN, N);
       return false;
     }
 
-    // Verify localStarts are contiguous and correct
+    // Verify active ranks have contiguous layout
     size_t expectedStart = 0;
     for (int r = 0; r < worldSize; r++) {
+      if (allLocalN[r] == 0)
+        continue; // inactive rank
       if (allLocalStart[r] != expectedStart) {
-        std::printf("FAIL: N=10, P=4 (Bluestein), rank %d localStart=%zu, expected=%zu\n",
-                    r,
-                    allLocalStart[r],
-                    expectedStart);
+        std::printf(
+            "FAIL: N=10, P=4 (Bluestein), "
+            "rank %d localStart=%zu, expected=%zu\n",
+            r, allLocalStart[r], expectedStart);
         return false;
       }
       expectedStart += allLocalN[r];
@@ -978,6 +1113,7 @@ int main(int argc, char* argv[]) {
   // hipFFT-specific tests for two-path distributed 1D FFT (default config = Bluestein)
   runner.run("hipFFT: Bluestein exact N-point layout", test_hipfft_bluestein_exact_layout);
   runner.run("hipFFT: equal allocSize all ranks", test_hipfft_equal_alloc_size);
+  runner.run("hipFFT: active semantics with localN=0", test_hipfft_active_zero_localn_semantics);
   runner.run("hipFFT: Bluestein allocSize = M/P", test_hipfft_bluestein_alloc_size_formula);
   runner.run("hipFFT: Bluestein localN formula (P=4)", test_hipfft_bluestein_local_n_formula_p4);
   runner.run("hipFFT: prime sizes with Bluestein", test_hipfft_prime_sizes);

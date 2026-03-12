@@ -75,18 +75,18 @@ int fft1dQueryLayout(
     localNTrans = 0;
     localStartTrans = 0;
 
-    // MPI_Comm_split is collective -- inactive ranks must participate.
+    // MPI_Comm_split is collective; inactive ranks must enter it.
     int rank = 0;
     MPI_Comm_rank(comm, &rank);
     MPI_Comm subcomm = MPI_COMM_NULL;
-    MPI_Comm_split(comm, MPI_UNDEFINED, rank, &subcomm);
-    // subcomm is MPI_COMM_NULL for this rank; nothing to free.
+    int splitRc = MPI_Comm_split(comm, MPI_UNDEFINED, rank, &subcomm);
+    if (splitRc != MPI_SUCCESS) {
+      return static_cast<int>(Status::ERR_MPI);
+    }
     return 0;
   }
 
-  // Create a temporary active subcommunicator (only ranks with localN > 0).
-  // Re-query FFTW on it: the Cooley-Tukey / Bluestein redistribution may
-  // require a larger allocSize when fewer ranks participate.
+  // Re-query on an active-rank subcommunicator.
   int rank = 0;
   MPI_Comm_rank(comm, &rank);
   MPI_Comm subcomm = MPI_COMM_NULL;
