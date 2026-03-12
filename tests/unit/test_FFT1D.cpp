@@ -100,7 +100,9 @@ static bool test_configuration1d_double() {
 }
 
 // Test: localN vs localAllocSize distinction for non-divisible sizes
-// This tests the L-based block layout: localN = min(L, max(N - rank*L, 0))
+// Backend-agnostic invariants: contiguous, non-overlapping, covers all of N.
+// The L-based block layout formula (localStart = rank*L, localN = min(L, N - rank*L))
+// only holds for the hipFFT backend; FFTW-MPI uses its own radix-based decomposition.
 static bool test_configuration1d_layout_correctness() {
   int worldSize, worldRank;
   MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
@@ -141,7 +143,28 @@ static bool test_configuration1d_layout_correctness() {
       return false;
     }
 
-    // Get allocSize (L) to verify localStart formula
+    // Verify: blocks are contiguous and non-overlapping
+    // localStart[i] should equal sum of localN[0..i-1]
+    for (int i = 0; i < worldSize; ++i) {
+      size_t expected_start = 0;
+      for (int j = 0; j < i; ++j)
+        expected_start += all_local_n[j];
+
+      if (all_local_start[i] != expected_start) {
+        if (worldRank == 0) {
+          std::printf("FAIL: N=%zu, rank %d localStart=%zu (expected %zu from contiguity)\n",
+                      N,
+                      i,
+                      all_local_start[i],
+                      expected_start);
+        }
+        return false;
+      }
+    }
+
+#if SHAFFT_BACKEND_HIPFFT
+    // hipFFT L-based block layout: localStart = min(rank*L, N),
+    // localN = min(L, max(N - rank*L, 0))
     shafft::FFT1D fft;
     rc = fft.init(N, localN, localStart, shafft::FFTType::C2C, MPI_COMM_WORLD);
     if (rc != 0)
@@ -192,6 +215,7 @@ static bool test_configuration1d_layout_correctness() {
         return false;
       }
     }
+#endif // SHAFFT_BACKEND_HIPFFT
   }
 
   return true;
