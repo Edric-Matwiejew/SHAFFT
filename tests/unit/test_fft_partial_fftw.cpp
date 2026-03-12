@@ -12,7 +12,7 @@
 #include <numeric>
 #include <vector>
 
-#include "fftw_method/fftnd_method.h"
+#include "fftw_method/fftnd_method.hpp"
 #include <shafft/shafft_types.hpp>
 
 using cplx = std::complex<double>;
