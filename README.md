@@ -53,16 +53,10 @@ cmake -B build -S . \
 cmake --build build --target install
 ```
 
-GPU builds use the [maintained gpuTT fork](https://github.com/Edric-Matwiejew/gputt).
-The default source revision is pinned. Override it with `GPUTT_GIT_TAG`, use an installed
-package via `gputt_DIR`, or set `-DGPUTT_SOURCE_DIR="$PWD/gputt"` for local development.
-Dependency binaries stay in the build directory.
+GPU builds download [gpuTT](https://github.com/Edric-Matwiejew/gputt) automatically when needed.
 
-For NVIDIA Hopper, configure with `cmake --preset hipfft-nvidia`, supplying the HIP
-and hipFFT install prefixes through `CMAKE_PREFIX_PATH`, then run
-`cmake --build --preset hipfft-nvidia`. The `hipfft-gh200` preset enables Cray
-GPU-aware MPI and Fortran for Pawsey; compile on an allocated GH200 node using its
-Arm software environment. See [GH200 setup and validation](docs/getting-started.dox).
+Use `hipfft-nvidia` for NVIDIA Hopper or `hipfft-gh200` for Pawsey GH200.
+See [Getting Started](docs/getting-started.dox) for configuration commands.
 
 ### Example
 

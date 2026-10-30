@@ -37,12 +37,9 @@ cmake -DCMAKE_PREFIX_PATH=/opt/shafft ..
 | `shafft::shafftc` | C interface |
 | `shafft::shafftf03` | Fortran interface |
 
-Targets include backend dependencies, GPU platform definitions and include paths.
-NVIDIA consumers need the matching HIP headers, hipFFT/cuFFT and CUDA toolkit
-discoverable through `CMAKE_PREFIX_PATH`/`CUDAToolkit_ROOT`. Ordinary application
-sources can use the MPI C, C++ and Fortran compilers; CUDA/HIP language support is
-needed only for application GPU kernels. See @ref getting-started for installed
-consumer checks on GH200.
+Targets include the required headers and libraries. For NVIDIA builds, make HIP,
+hipFFT and CUDA discoverable through `CMAKE_PREFIX_PATH` and `CUDAToolkit_ROOT`.
+Applications without GPU kernels can use their normal MPI compiler.
 
 ### Check Backend at Configure Time
 
@@ -113,8 +110,7 @@ mpifort -I/opt/shafft/include \
     -o my_program my_program.f03
 ```
 
-For NVIDIA builds, use the CMake targets above so the HIP NVIDIA definitions,
-CUDA runtime and hipFFT/cuFFT dependencies propagate to C, C++ and Fortran consumers.
+For NVIDIA builds, use the CMake targets above.
 
 ## Runtime Library Path
 

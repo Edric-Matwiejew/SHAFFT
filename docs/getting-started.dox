@@ -74,59 +74,30 @@ cmake -B build -S . \
 cmake --build build --target install
 ```
 
-See @ref backends for GPU architecture lists and GPU-aware MPI configuration.
-
-NVIDIA builds require CUDA, HIP headers, and hipFFT built with its cuFFT backend;
-the CUDA toolkit alone is insufficient. Use matching Arm64 dependencies on GH200.
-The `hipfft-nvidia` preset provides the NVIDIA configuration above with host-staged MPI.
-gpuTT is built from a pinned fork revision; `GPUTT_SOURCE_DIR` selects a local checkout.
+NVIDIA builds require CUDA, HIP headers, and hipFFT built for cuFFT.
+The `hipfft-nvidia` preset provides this NVIDIA configuration.
+See @ref backends for architecture lists and GPU-aware MPI options.
 
 ## Pawsey GH200
 
-Compile natively on an allocated GH200 node in the `quantum` partition. Follow
-[Pawsey's current environment setup](https://pawsey.atlassian.net/wiki/spaces/US/pages/1063682139/Setonix-Q%2BQuantum%2BPartition%2BQuick%2BStart)
-for its separate Arm software stack, GNU programming environment and CUDA modules.
-Use the loaded Cray wrappers and matching Arm64 HIP/hipFFT installations:
+Build on an allocated GH200 node in the `quantum` partition using
+[Pawsey's Arm software environment](https://pawsey.atlassian.net/wiki/spaces/US/pages/1063682139/Setonix-Q%2BQuantum%2BPartition%2BQuick%2BStart)
+and Arm64 HIP/hipFFT installations:
 
 ```bash
 CC=cc CXX=CC FC=ftn cmake --preset hipfft-gh200 \
     -DCMAKE_PREFIX_PATH="/path/to/arm64/hip;/path/to/arm64/hipfft" \
     -DCMAKE_INSTALL_PREFIX="$PWD/install/gh200" \
-    -DSHAFFT_BUILD_EXAMPLES=ON \
     -DMPIEXEC_EXECUTABLE=srun -DMPIEXEC_NUMPROC_FLAG=-n
 cmake --build --preset hipfft-gh200
 ```
 
-This preset requires the CUDA GTL for Cray MPICH. Set `CMAKE_HIP_HOST_COMPILER` in
-the initial configure command or a toolchain if NVCC needs an explicit host compiler;
-the preset leaves that choice to the environment. Do not reuse x86 build directories
-or dependencies from the AMD Setonix nodes.
-
-### Cluster validation
-
-The following are cluster checks to run after building; they have not been validated
-on GH200. Allocate enough GPUs for four MPI ranks, then test C++, C and Fortran
-round trips at one, two and four ranks:
+The preset enables Fortran and GPU-aware Cray MPICH, requiring CUDA GTL.
+Run a single-rank round-trip test within your allocation, then install:
 
 ```bash
-MPICH_GPU_SUPPORT_ENABLED=1 ctest --preset hipfft-gh200 \
-    -R '^(test_roundtrip|test_c_roundtrip|test_f03_roundtrip)_(1|2|4)ranks$'
-```
-
-Repeat with host staging after configuring and rebuilding with
-`-DSHAFFT_GPU_AWARE_MPI=OFF -DSHAFFT_REQUIRE_GTL=OFF`, setting
-`MPICH_GPU_SUPPORT_ENABLED=0` for that test run. Restore the GPU-aware preset and
-rebuild before installation. Verify installed-package consumers independently:
-
-```bash
+MPICH_GPU_SUPPORT_ENABLED=1 ctest --preset hipfft-gh200 -R '^test_roundtrip_1ranks$'
 cmake --install build/hipfft-gh200
-CC=cc CXX=CC FC=ftn cmake -S examples -B build/gh200-consumers \
-    -DSHAFFT_PATH="$PWD/install/gh200" \
-    -DCMAKE_PREFIX_PATH="/path/to/arm64/hip;/path/to/arm64/hipfft"
-cmake --build build/gh200-consumers
-MPICH_GPU_SUPPORT_ENABLED=1 srun -n 1 build/gh200-consumers/example_portable
-MPICH_GPU_SUPPORT_ENABLED=1 srun -n 1 build/gh200-consumers/example_portable_c
-MPICH_GPU_SUPPORT_ENABLED=1 srun -n 1 build/gh200-consumers/example_f03_portable
 ```
 
 ## Verifying Installation

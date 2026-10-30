@@ -91,16 +91,14 @@ Uses [hipFFT](https://github.com/ROCm/hipFFT) for GPU-accelerated FFTs. Works wi
 | `SHAFFT_ENABLE_HIPFFT` | Enable hipFFT backend | `ON` |
 | `CMAKE_HIP_PLATFORM` | Target: `amd` or `nvidia` | Auto |
 | `CMAKE_HIP_COMPILER` | AMD HIP-Clang or NVIDIA `nvcc` | Auto |
+| `CMAKE_HIP_HOST_COMPILER` | NVCC host compiler; set on initial configure | Auto |
+| `SHAFFT_HIP_GCC_TOOLCHAIN` | GCC installation for AMD HIP-Clang | Auto |
 | `ROCM_PATH` | ROCm installation | `/opt/rocm` |
 | `CUDAToolkit_ROOT` | CUDA toolkit discovery hint | Auto |
 | `SHAFFT_GPU_ARCHITECTURES` | AMD `gfx*` or NVIDIA numeric architectures | Auto |
 | `SHAFFT_GPU_AWARE_MPI` | Use GPU-aware MPI | `ON` |
-
-CMake selects configuration and position-independent-code flags for the HIP compiler.
-For AMD HIP-Clang, `SHAFFT_HIP_GCC_TOOLCHAIN` can specify a GCC installation root;
-if empty, SHAFFT attempts to discover it. For NVIDIA/NVCC, select the host C++
-compiler with `CMAKE_HIP_HOST_COMPILER` in the initial configure command, preset,
-or toolchain file. The AMD GCC toolchain workarounds are not applied to NVCC.
+| `GPUTT_SOURCE_DIR` | Local gpuTT checkout | - |
+| `gputt_DIR` | Installed gpuTT CMake package directory | Auto |
 
 ### AMD GPU Build
 
@@ -134,15 +132,14 @@ cmake -B build -S . \
 cmake --build build --target install
 ```
 
-NVIDIA architecture values are numeric CMake values: `80` for A100, `86` for
-RTX 3090/A40, and `90` for H100/GH200. Specify multiple architectures as a quoted
-semicolon-separated list. The selected CUDA toolkit must support every requested GPU.
+NVIDIA architectures:
+- `80` - A100
+- `86` - RTX 3090, A40
+- `90` - H100, GH200
 
-The CUDA toolkit does not provide HIP headers or hipFFT. Install a matching HIP
-portability layer and hipFFT with `BUILD_WITH_LIB=CUDA`, then put both prefixes in
-`CMAKE_PREFIX_PATH`. gpuTT uses its native CUDA backend on NVIDIA and HIP on AMD.
-Use `hipfft-nvidia` for initial host-staged builds or `hipfft-gh200` for Pawsey's
-Cray MPICH/GTL configuration; see @ref getting-started for cluster validation.
+Use a quoted semicolon-separated list for multiple architectures supported by your toolkit.
+Build hipFFT with `BUILD_WITH_LIB=CUDA` and add the HIP and hipFFT install prefixes
+to `CMAKE_PREFIX_PATH`. See @ref getting-started for NVIDIA and Pawsey presets.
 
 ### Environment Variables
 
