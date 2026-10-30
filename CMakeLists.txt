@@ -108,11 +108,17 @@ elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 
 if(SHAFFT_ENABLE_HIPFFT)
+  set(CMAKE_HIP_STANDARD 17)
+  set(CMAKE_HIP_STANDARD_REQUIRED ON)
+  set(CMAKE_HIP_EXTENSIONS OFF)
+
   if(SHAFFT_GPU_ARCHITECTURES)
     set(CMAKE_HIP_ARCHITECTURES ${SHAFFT_GPU_ARCHITECTURES})
     message(STATUS "GPU architectures: ${CMAKE_HIP_ARCHITECTURES}")
   endif()
 
+  # NVIDIA builds may select CMAKE_HIP_HOST_COMPILER in a preset or toolchain
+  # before enabling HIP; let CMake pass the host compiler choice to NVCC.
   enable_language(HIP)
 
   if(DEFINED ENV{ROCM_PATH})
@@ -145,67 +151,57 @@ if(SHAFFT_ENABLE_HIPFFT)
     set(SHAFFT_HAVE_GTL FALSE)
   endif()
 
-  if(NOT DEFINED CMAKE_HIP_FLAGS)
-    set(CMAKE_HIP_FLAGS "")
-  endif()
-
-  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -g -O0")
-  elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -O3")
-  endif()
-
-  string(FIND "${CMAKE_HIP_FLAGS}" "-fPIC" PIC_FOUND)
-  if(PIC_FOUND EQUAL -1)
-    set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -fPIC")
-  endif()
-
+  # CMake supplies configuration-specific HIP flags and PIC flags for the
+  # selected compiler via CMAKE_HIP_FLAGS_<CONFIG> and POSITION_INDEPENDENT_CODE.
   set(SHAFFT_HIP_GCC_TOOLCHAIN "" CACHE PATH
-    "GCC toolchain root for HIP compiler (auto-detected if empty)")
-  
-  string(FIND "${CMAKE_HIP_FLAGS}" "--gcc-toolchain" GCC_TOOLCHAIN_FOUND)
-  if(GCC_TOOLCHAIN_FOUND EQUAL -1)
-    if(SHAFFT_HIP_GCC_TOOLCHAIN)
-      set(_gcc_toolchain "${SHAFFT_HIP_GCC_TOOLCHAIN}")
-    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      get_filename_component(_cxx_dir ${CMAKE_CXX_COMPILER} DIRECTORY)
-      get_filename_component(_gcc_toolchain ${_cxx_dir} DIRECTORY)
-    endif()
-    
-    if(_gcc_toolchain AND IS_DIRECTORY "${_gcc_toolchain}")
-      set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --gcc-toolchain=${_gcc_toolchain}")
-      message(STATUS "GCC toolchain: ${_gcc_toolchain}")
-    endif()
-    
-    execute_process(
-      COMMAND ${CMAKE_CXX_COMPILER} -dumpversion
-      OUTPUT_VARIABLE _gcc_version
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    string(REGEX MATCH "^[0-9]+" _gcc_major "${_gcc_version}")
-    
-    set(_cxx_inc "")
-    foreach(_base IN ITEMS "${_gcc_toolchain}/include/c++" "/usr/include/c++")
-      if(IS_DIRECTORY "${_base}/${_gcc_major}")
-        set(_cxx_inc "${_base}/${_gcc_major}")
-        break()
-      elseif(IS_DIRECTORY "${_base}/${_gcc_version}")
-        set(_cxx_inc "${_base}/${_gcc_version}")
-        break()
+    "GCC toolchain root for AMD HIP-Clang (auto-detected if empty)")
+
+  # These Clang/GCC workarounds must not be passed to NVCC.
+  if(CMAKE_HIP_PLATFORM STREQUAL "amd" AND CMAKE_HIP_COMPILER_ID STREQUAL "Clang")
+    string(FIND "${CMAKE_HIP_FLAGS}" "--gcc-toolchain" GCC_TOOLCHAIN_FOUND)
+    if(GCC_TOOLCHAIN_FOUND EQUAL -1)
+      if(SHAFFT_HIP_GCC_TOOLCHAIN)
+        set(_gcc_toolchain "${SHAFFT_HIP_GCC_TOOLCHAIN}")
+      elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        get_filename_component(_cxx_dir ${CMAKE_CXX_COMPILER} DIRECTORY)
+        get_filename_component(_gcc_toolchain ${_cxx_dir} DIRECTORY)
       endif()
-    endforeach()
-    
-    if(_cxx_inc)
-      set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -isystem ${_cxx_inc}")
-      message(STATUS "GCC C++ includes: ${_cxx_inc}")
-      
-      file(GLOB _target_dirs "${_cxx_inc}/*-linux*")
-      foreach(_tdir IN LISTS _target_dirs)
-        if(IS_DIRECTORY "${_tdir}")
-          set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -isystem ${_tdir}")
-          message(STATUS "GCC C++ target includes: ${_tdir}")
+
+      if(_gcc_toolchain AND IS_DIRECTORY "${_gcc_toolchain}")
+        set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} --gcc-toolchain=${_gcc_toolchain}")
+        message(STATUS "GCC toolchain: ${_gcc_toolchain}")
+      endif()
+
+      execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} -dumpversion
+        OUTPUT_VARIABLE _gcc_version
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+      )
+      string(REGEX MATCH "^[0-9]+" _gcc_major "${_gcc_version}")
+
+      set(_cxx_inc "")
+      foreach(_base IN ITEMS "${_gcc_toolchain}/include/c++" "/usr/include/c++")
+        if(IS_DIRECTORY "${_base}/${_gcc_major}")
+          set(_cxx_inc "${_base}/${_gcc_major}")
+          break()
+        elseif(IS_DIRECTORY "${_base}/${_gcc_version}")
+          set(_cxx_inc "${_base}/${_gcc_version}")
+          break()
         endif()
       endforeach()
+
+      if(_cxx_inc)
+        set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -isystem ${_cxx_inc}")
+        message(STATUS "GCC C++ includes: ${_cxx_inc}")
+
+        file(GLOB _target_dirs "${_cxx_inc}/*-linux*")
+        foreach(_tdir IN LISTS _target_dirs)
+          if(IS_DIRECTORY "${_tdir}")
+            set(CMAKE_HIP_FLAGS "${CMAKE_HIP_FLAGS} -isystem ${_tdir}")
+            message(STATUS "GCC C++ target includes: ${_tdir}")
+          endif()
+        endforeach()
+      endif()
     endif()
   endif()
 

@@ -94,6 +94,12 @@ Uses [hipFFT](https://github.com/ROCm/hipFFT) for GPU-accelerated FFTs. Works wi
 | `OFFLOAD_ARCH` | GPU architecture | Auto |
 | `SHAFFT_GPU_AWARE_MPI` | Use GPU-aware MPI | `ON` |
 
+CMake selects configuration and position-independent-code flags for the HIP compiler.
+For AMD HIP-Clang, `SHAFFT_HIP_GCC_TOOLCHAIN` can specify a GCC installation root;
+if empty, SHAFFT attempts to discover it. For NVIDIA/NVCC, select the host C++
+compiler with `CMAKE_HIP_HOST_COMPILER` in the initial configure command, preset,
+or toolchain file. The AMD GCC toolchain workarounds are not applied to NVCC.
+
 ### AMD GPU Build
 
 ```bash
