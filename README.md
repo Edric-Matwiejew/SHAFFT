@@ -47,11 +47,17 @@ cmake --build build --target install
 cmake -B build -S . \
     -DSHAFFT_ENABLE_HIPFFT=ON \
     -DSHAFFT_GPU_AWARE_MPI=OFF \
+    -DGPUTT_SOURCE_DIR=/path/to/gputt \
     -DCMAKE_PREFIX_PATH=/opt/rocm \
     -DCMAKE_INSTALL_PREFIX=/opt/shafft
 
 cmake --build build --target install
 ```
+
+GPU builds use the [maintained gpuTT fork](https://github.com/Edric-Matwiejew/gputt).
+Use `-DGPUTT_SOURCE_DIR="$PWD/gputt"` for a checkout inside SHAFFT. Alternatively,
+use an installed package via `gputt_DIR`, or set `GPUTT_GIT_TAG` to a published
+commit or release tag to fetch that revision. Dependency binaries stay in the build directory.
 
 ### Example
 

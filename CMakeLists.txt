@@ -130,9 +130,6 @@ if(SHAFFT_ENABLE_HIPFFT)
   find_package(hip REQUIRED CONFIG)
   find_package(hipfft REQUIRED)
 
-  include(GputtDependency)
-  message(STATUS "gpuTT: provider=${GPUTT_PROVIDER}, version=${GPUTT_VERSION}")
-
   if(SHAFFT_GPU_AWARE_MPI)
     option(SHAFFT_REQUIRE_GTL "Require GTL library for GPU-aware MPI on Cray systems" OFF)
     find_package(CrayGTL QUIET)
@@ -206,6 +203,8 @@ if(SHAFFT_ENABLE_HIPFFT)
   endif()
 
   message(STATUS "CMAKE_HIP_FLAGS: ${CMAKE_HIP_FLAGS}")
+  include(GputtDependency)
+  message(STATUS "gpuTT: provider=${GPUTT_PROVIDER}, version=${GPUTT_VERSION}")
 else()
   set(_shafft_need_openmp FALSE)
   if(SHAFFT_FFTW_THREADS STREQUAL "openmp")

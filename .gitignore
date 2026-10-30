@@ -15,3 +15,4 @@ results
 .venv
 temp
 .deps
+/gputt/
