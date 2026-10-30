@@ -91,6 +91,11 @@ if(DEFINED GTL_ARCH AND GTL_ARCH)
   # User override
   set(_gtl_arch "${GTL_ARCH}")
   message(VERBOSE "FindCrayGTL: Using user-specified GTL_ARCH=${_gtl_arch}")
+elseif(CMAKE_HIP_PLATFORM STREQUAL "nvidia" AND CMAKE_HIP_ARCHITECTURES)
+  list(GET CMAKE_HIP_ARCHITECTURES 0 _first_arch)
+  string(REGEX MATCH "^[0-9]+" _cuda_arch "${_first_arch}")
+  set(_gtl_arch "nvidia${_cuda_arch}")
+  message(VERBOSE "FindCrayGTL: Detected NVIDIA GPU from HIP: ${_gtl_arch}")
 elseif(CMAKE_HIP_ARCHITECTURES)
   # AMD GPU - use CMake's HIP architecture
   list(GET CMAKE_HIP_ARCHITECTURES 0 _first_arch)
