@@ -13,7 +13,7 @@ Compile and link programs that use SHAFFT.
 ## CMake (Recommended)
 
 ```cmake
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.28)
 project(my_fft_app)
 
 find_package(shafft REQUIRED)

@@ -6,7 +6,7 @@ Installation and build options for SHAFFT.
 
 | Requirement | Minimum | Notes |
 |-------------|---------|-------|
-| CMake | 3.21 | Build system |
+| CMake | 3.28 | Build system |
 | MPI | Any | OpenMPI, MPICH, Cray MPICH |
 | C++ Compiler | GCC 10+ | C++17 required |
 
@@ -116,7 +116,7 @@ mpicxx -I/opt/shafft/include -L/opt/shafft/lib -lshafftc++ \
 ## Using CMake
 
 ```cmake
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.28)
 project(my_fft_app)
 
 find_package(shafft REQUIRED)

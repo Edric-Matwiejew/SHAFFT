@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.28)
 project(SHAFFT_Tests LANGUAGES C CXX)
 
 if(SHAFFT_BUILD_FORTRAN)

@@ -26,7 +26,7 @@
 
 ### Requirements
 
-- CMake >= 3.21
+- CMake >= 3.28
 - MPI implementation
 - C++17-compatible compiler (GCC >= 10)
 - Backend: FFTW3 (CPU) or ROCm/HIP (GPU)

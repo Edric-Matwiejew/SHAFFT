@@ -7,7 +7,7 @@ using the current Fortran toolchain.
 
 Requirements
 ^^^^^^^^^^^^
-- CMake 3.25 or later
+- CMake 3.28 or later
 - Fortran language enabled in the parent project
 - ROCm installation (unless ``HIPFORT_REQUIRE_ROCM`` is OFF)
 
@@ -28,7 +28,7 @@ Usage
 
 include_guard(GLOBAL)
 
-cmake_minimum_required(VERSION 3.25...4.0)
+cmake_minimum_required(VERSION 3.28...4.0)
 
 #=============================================================================
 # Configuration options
