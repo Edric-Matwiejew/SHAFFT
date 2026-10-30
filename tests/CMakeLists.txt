@@ -1,118 +1,44 @@
 cmake_minimum_required(VERSION 3.28)
 project(SHAFFT_Tests LANGUAGES C CXX)
 
-if(SHAFFT_BUILD_FORTRAN)
-  enable_language(Fortran)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+enable_testing()
+
+if(NOT TARGET shafftc++)
+  find_package(shafft CONFIG REQUIRED HINTS "${SHAFFT_ROOT}" "${SHAFFT_PATH}" "$ENV{SHAFFT_ROOT}")
+  foreach(_binding IN ITEMS shafftc++ shafftc shafftf03)
+    if(TARGET shafft::${_binding})
+      add_library(${_binding} ALIAS shafft::${_binding})
+    endif()
+  endforeach()
 endif()
 
 if(SHAFFT_BUILD_FORTRAN)
+  enable_language(Fortran)
   find_package(MPI REQUIRED COMPONENTS C CXX Fortran)
 else()
   find_package(MPI REQUIRED COMPONENTS C CXX)
 endif()
 
-if(TARGET shafftc++)
-  message(STATUS "Using shafftc++ target from parent build")
-  set(
-    SHAFFT_INCLUDE_DIR
-    ${CMAKE_BINARY_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/../include
-  )
-else()
-  set(SHAFFT_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
-  if(EXISTS ${SHAFFT_ROOT}/include/shafft.hpp)
-    set(SHAFFT_INCLUDE_DIR ${SHAFFT_ROOT}/include)
-    set(SHAFFT_LIB_HINT ${SHAFFT_ROOT}/lib ${SHAFFT_ROOT}/lib64)
-  else()
-    find_path(SHAFFT_INCLUDE_DIR shafft.hpp HINTS /usr/local/include $ENV{SHAFFT_ROOT}/include)
-    set(
-      SHAFFT_LIB_HINT
-      /usr/local/lib
-      /usr/local/lib64
-      $ENV{SHAFFT_ROOT}/lib
-      $ENV{SHAFFT_ROOT}/lib64
-    )
+set(HIP_ENABLED ${SHAFFT_BACKEND_HIPFFT})
+set(SHAFFT_ENABLE_FFTW ${SHAFFT_BACKEND_FFTW})
+if(HIP_ENABLED)
+  if(NOT TARGET hip::hipfft)
+    find_package(hipfft CONFIG REQUIRED)
   endif()
-
-  file(READ ${SHAFFT_INCLUDE_DIR}/shafft_config.h SHAFFT_CONFIG_CONTENT)
-  string(REGEX MATCH "#define SHAFFT_BACKEND_HIPFFT 1" HIP_ENABLED ${SHAFFT_CONFIG_CONTENT})
-  if(HIP_ENABLED)
-    list(APPEND CMAKE_PREFIX_PATH $ENV{ROCM_PATH} /opt/rocm)
-    find_package(hip QUIET)
-    if(hip_FOUND)
-      set(HIP_INCLUDE_DIRS ${hip_INCLUDE_DIRS})
+  if(NOT TARGET gputt::gputt)
+    if(GPUTT_SOURCE_DIR)
+      set(CMAKE_HIP_PLATFORM "${SHAFFT_GPU_PLATFORM}")
+      set(CMAKE_HIP_ARCHITECTURES "${SHAFFT_GPU_ARCHITECTURES}")
+      include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/GputtDependency.cmake)
     else()
-      set(HIP_INCLUDE_DIRS $ENV{ROCM_PATH}/include /opt/rocm/include)
+      find_package(gputt CONFIG REQUIRED)
     endif()
-    add_compile_definitions(__HIP_PLATFORM_AMD__)
-  else()
-    set(HIP_INCLUDE_DIRS "")
-  endif()
-
-  find_library(SHAFFT_CXX_LIB NAMES shafftc++ HINTS ${SHAFFT_LIB_HINT})
-  if(NOT SHAFFT_CXX_LIB)
-    message(FATAL_ERROR "Could not find shafftc++ library (set SHAFFT_ROOT or install SHAFFT).")
-  endif()
-  add_library(shafftc++ SHARED IMPORTED)
-  set_target_properties(
-    shafftc++
-    PROPERTIES
-      IMPORTED_LOCATION ${SHAFFT_CXX_LIB}
-      INTERFACE_INCLUDE_DIRECTORIES
-        "$<BUILD_INTERFACE:${SHAFFT_INCLUDE_DIR};${HIP_INCLUDE_DIRS}>;$<INSTALL_INTERFACE:include>"
-  )
-
-  find_library(SHAFFT_C_LIB NAMES shafftc HINTS ${SHAFFT_LIB_HINT})
-  if(NOT SHAFFT_C_LIB)
-    message(FATAL_ERROR "Could not find shafftc library required for C API tests.")
-  endif()
-  add_library(shafftc SHARED IMPORTED)
-  set_target_properties(
-    shafftc
-    PROPERTIES
-      IMPORTED_LOCATION ${SHAFFT_C_LIB}
-      INTERFACE_INCLUDE_DIRECTORIES
-        "$<BUILD_INTERFACE:${SHAFFT_INCLUDE_DIR};${HIP_INCLUDE_DIRS}>;$<INSTALL_INTERFACE:include>"
-  )
-
-  if(SHAFFT_BUILD_FORTRAN)
-    find_library(SHAFFT_F03_LIB NAMES shafftf03 HINTS ${SHAFFT_LIB_HINT})
-    if(NOT SHAFFT_F03_LIB)
-      message(FATAL_ERROR "SHAFFT_BUILD_FORTRAN=ON but shafftf03 library not found.")
-    endif()
-    add_library(shafftf03 SHARED IMPORTED)
-    set_target_properties(
-      shafftf03
-      PROPERTIES
-        IMPORTED_LOCATION ${SHAFFT_F03_LIB}
-        INTERFACE_INCLUDE_DIRECTORIES
-          "$<BUILD_INTERFACE:${SHAFFT_INCLUDE_DIR};${HIP_INCLUDE_DIRS}>;"
-          "$<INSTALL_INTERFACE:include>"
-    )
   endif()
 endif()
 
-if(NOT DEFINED HIP_ENABLED)
-  if(DEFINED SHAFFT_BACKEND_HIPFFT)
-    set(HIP_ENABLED ${SHAFFT_BACKEND_HIPFFT})
-  elseif(DEFINED SHAFFT_ENABLE_HIPFFT)
-    set(HIP_ENABLED ${SHAFFT_ENABLE_HIPFFT})
-  elseif(EXISTS ${CMAKE_BINARY_DIR}/include/shafft/shafft_config.h)
-    file(READ ${CMAKE_BINARY_DIR}/include/shafft/shafft_config.h SHAFFT_CONFIG_CONTENT)
-    string(REGEX MATCH "#define SHAFFT_BACKEND_HIPFFT 1" HIP_ENABLED ${SHAFFT_CONFIG_CONTENT})
-  elseif(EXISTS ${SHAFFT_INCLUDE_DIR}/shafft_config.h)
-    file(READ ${SHAFFT_INCLUDE_DIR}/shafft_config.h SHAFFT_CONFIG_CONTENT)
-    string(REGEX MATCH "#define SHAFFT_BACKEND_HIPFFT 1" HIP_ENABLED ${SHAFFT_CONFIG_CONTENT})
-  else()
-    set(HIP_ENABLED 0)
-  endif()
-endif()
-
-set(TEST_INCLUDES ${SHAFFT_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/include)
-
-if(SHAFFT_ENABLE_FFTW)
-  list(APPEND TEST_INCLUDES ${FFTW_INCLUDE_DIRS})
-endif()
+set(TEST_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 function(add_mpi_test TEST_NAME TEST_SOURCE)
   add_executable(${TEST_NAME} ${TEST_SOURCE})
@@ -184,18 +110,16 @@ if(HIP_ENABLED)
     test_hipfft_method
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/../src/cpp/fft/hipfft_method
-      ${GPUTT_INCLUDE_DIR}
   )
-  target_link_libraries(test_hipfft_method PRIVATE gputt)
+  target_link_libraries(test_hipfft_method PRIVATE hip::hipfft gputt::gputt)
 
   add_unit_test(test_superbatch_threshold unit/test_superbatch_threshold.cpp)
   target_include_directories(
     test_superbatch_threshold
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/../src/cpp/fft/hipfft_method
-      ${GPUTT_INCLUDE_DIR}
   )
-  target_link_libraries(test_superbatch_threshold PRIVATE gputt)
+  target_link_libraries(test_superbatch_threshold PRIVATE hip::hipfft gputt::gputt)
 endif()
 add_unit_test(test_fft_highdim unit/test_fft_highdim.cpp)
 
@@ -204,23 +128,6 @@ if(OpenMP_CXX_FOUND)
   target_link_libraries(test_fft_highdim PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
-# Only find FFTW if not already found by parent project
-if(NOT TARGET FFTW::Double)
-  find_package(FFTW QUIET COMPONENTS DOUBLE_LIB)
-  if(NOT FFTW_FOUND)
-    include(FetchContent)
-    FetchContent_Declare(
-      FindFFTW
-      GIT_REPOSITORY https://github.com/egpbos/findfftw.git
-      GIT_TAG master
-      GIT_SHALLOW TRUE
-      UPDATE_DISCONNECTED TRUE
-    )
-    FetchContent_MakeAvailable(FindFFTW)
-    list(APPEND CMAKE_MODULE_PATH "${findfftw_SOURCE_DIR}")
-    find_package(FFTW QUIET COMPONENTS DOUBLE_LIB)
-  endif()
-endif()
 if(HIP_ENABLED)
   add_unit_test(test_fft_partial_hipfft unit/test_fft_partial.cpp)
   target_include_directories(
@@ -228,9 +135,8 @@ if(HIP_ENABLED)
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/../src/cpp/fft
       ${CMAKE_CURRENT_SOURCE_DIR}/../src/cpp/fft/hipfft_method
-      ${GPUTT_INCLUDE_DIR}
   )
-  target_link_libraries(test_fft_partial_hipfft PRIVATE gputt)
+  target_link_libraries(test_fft_partial_hipfft PRIVATE hip::hipfft gputt::gputt)
 endif()
 
 # Component tests: verify third-party library integration (gpuTT, hipFFT)
@@ -238,9 +144,9 @@ if(HIP_ENABLED)
   add_executable(test_transpose_fft component/test_transpose_fft.cpp)
   target_include_directories(
     test_transpose_fft
-    PRIVATE ${TEST_INCLUDES} ${GPUTT_INCLUDE_DIR}
+    PRIVATE ${TEST_INCLUDES}
   )
-  target_link_libraries(test_transpose_fft PRIVATE shafftc++ MPI::MPI_CXX hip::hipfft gputt)
+  target_link_libraries(test_transpose_fft PRIVATE shafftc++ MPI::MPI_CXX hip::hipfft gputt::gputt)
   add_test(
     NAME test_transpose_fft
     COMMAND
@@ -360,7 +266,6 @@ if(SHAFFT_BUILD_FORTRAN)
       ${TEST_NAME}
       PRIVATE
         ${TEST_INCLUDES}
-        ${CMAKE_BINARY_DIR}/include # For shafft.mod
         ${CMAKE_CURRENT_BINARY_DIR} # For test_utils_f.mod
     )
 
@@ -387,7 +292,6 @@ if(SHAFFT_BUILD_FORTRAN)
   endfunction()
 
   add_library(test_utils_f STATIC ${TEST_UTILS_F90})
-  target_include_directories(test_utils_f PRIVATE ${CMAKE_BINARY_DIR}/include)
   target_link_libraries(test_utils_f PRIVATE MPI::MPI_Fortran shafftf03)
   set_target_properties(
     test_utils_f PROPERTIES Fortran_MODULE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}

@@ -11,104 +11,34 @@ else()
   message(STATUS "Building examples standalone - using find_package(shafft)")
   set(SHAFFT_EXAMPLES_STANDALONE TRUE)
 
-  if(NOT DEFINED SHAFFT_PATH)
-    message(FATAL_ERROR "Please configure with -DSHAFFT_PATH=/path/to/shafft/install/prefix")
-  endif()
-
-  find_package(
-    shafft
-    REQUIRED
-    HINTS
-      "${SHAFFT_PATH}/lib/cmake/shafft"
-      "${SHAFFT_PATH}/${CMAKE_INSTALL_LIBDIR}/cmake/shafft"
-      "${SHAFFT_PATH}/lib64/cmake/shafft"
-  )
+  find_package(shafft CONFIG REQUIRED HINTS "${SHAFFT_PATH}" "${SHAFFT_ROOT}" "$ENV{SHAFFT_ROOT}")
 
   if(SHAFFT_BACKEND_HIPFFT)
-    set(SHAFFT_USE_HIPFFT TRUE)
     message(STATUS "SHAFFT was built with HIPFFT backend")
   else()
-    set(SHAFFT_USE_HIPFFT FALSE)
     message(STATUS "SHAFFT was built with FFTW backend")
-  endif()
-endif()
-
-if(SHAFFT_EXAMPLES_STANDALONE)
-  find_package(PkgConfig REQUIRED)
-  pkg_check_modules(FFTW3 REQUIRED IMPORTED_TARGET fftw3)
-  pkg_check_modules(FFTW3F REQUIRED IMPORTED_TARGET fftw3f)
-
-  set(FFTW_THREADS_TARGET "")
-  pkg_check_modules(FFTW3_THREADS QUIET IMPORTED_TARGET fftw3_threads)
-  if(FFTW3_THREADS_FOUND)
-    set(FFTW_THREADS_TARGET PkgConfig::FFTW3_THREADS)
-  else()
-    pkg_check_modules(FFTW3_OMP QUIET IMPORTED_TARGET fftw3_omp)
-    if(FFTW3_OMP_FOUND)
-      set(FFTW_THREADS_TARGET PkgConfig::FFTW3_OMP)
-    else()
-      find_library(
-        FFTW_THREADS_LIB
-        NAMES fftw3_threads fftw3_omp
-        HINTS /opt/homebrew/lib
-        ENV LIBRARY_PATH
-        ${CMAKE_PREFIX_PATH}
-      )
-      if(NOT FFTW_THREADS_LIB)
-        message(FATAL_ERROR "Could not find FFTW threads library (fftw3_threads or fftw3_omp).")
-      endif()
-      set(FFTW_THREADS_TARGET "${FFTW_THREADS_LIB}")
-    endif()
   endif()
 endif()
 
 find_package(MPI REQUIRED)
 
-if(SHAFFT_USE_HIPFFT OR SHAFFT_ENABLE_HIPFFT)
+if(SHAFFT_BACKEND_HIPFFT)
   add_executable(example_hip example.cpp)
 
   target_link_libraries(example_hip PRIVATE shafft::shafftc++ MPI::MPI_CXX)
-
-  if(SHAFFT_EXAMPLES_STANDALONE)
-    target_link_libraries(
-      example_hip
-      PRIVATE PkgConfig::FFTW3 PkgConfig::FFTW3F ${FFTW_THREADS_TARGET}
-    )
-  endif()
 endif()
 
 add_executable(example_portable example_portable.cpp)
 
 target_link_libraries(example_portable PRIVATE shafft::shafftc++ MPI::MPI_CXX)
 
-if(SHAFFT_EXAMPLES_STANDALONE)
-  target_link_libraries(
-    example_portable
-    PRIVATE PkgConfig::FFTW3 PkgConfig::FFTW3F ${FFTW_THREADS_TARGET}
-  )
-endif()
-
 add_executable(example_portable_config example_portable_config.cpp)
 
 target_link_libraries(example_portable_config PRIVATE shafft::shafftc++ MPI::MPI_CXX)
 
-if(SHAFFT_EXAMPLES_STANDALONE)
-  target_link_libraries(
-    example_portable_config
-    PRIVATE PkgConfig::FFTW3 PkgConfig::FFTW3F ${FFTW_THREADS_TARGET}
-  )
-endif()
-
 add_executable(example_FFT1D example_FFT1D.cpp)
 
 target_link_libraries(example_FFT1D PRIVATE shafft::shafftc++ MPI::MPI_CXX)
-
-if(SHAFFT_EXAMPLES_STANDALONE)
-  target_link_libraries(
-    example_FFT1D
-    PRIVATE PkgConfig::FFTW3 PkgConfig::FFTW3F ${FFTW_THREADS_TARGET}
-  )
-endif()
 
 enable_language(C)
 
@@ -118,22 +48,9 @@ add_executable(example_portable_c example_portable.c)
 
 target_link_libraries(example_portable_c PRIVATE shafft::shafftc MPI::MPI_C m)
 
-if(SHAFFT_EXAMPLES_STANDALONE)
-  target_link_libraries(
-    example_portable_c PRIVATE PkgConfig::FFTW3 PkgConfig::FFTW3F ${FFTW_THREADS_TARGET}
-  )
-endif()
-
 add_executable(example_portable_c_config example_portable_config.c)
 
 target_link_libraries(example_portable_c_config PRIVATE shafft::shafftc MPI::MPI_C m)
-
-if(SHAFFT_EXAMPLES_STANDALONE)
-  target_link_libraries(
-    example_portable_c_config
-    PRIVATE PkgConfig::FFTW3 PkgConfig::FFTW3F ${FFTW_THREADS_TARGET}
-  )
-endif()
 
 if(SHAFFT_EXAMPLES_STANDALONE AND TARGET shafft::shafftf03)
   enable_language(Fortran)
@@ -148,9 +65,6 @@ if(SHAFFT_EXAMPLES_STANDALONE AND TARGET shafft::shafftf03)
     PRIVATE
       shafft::shafftf03
       MPI::MPI_Fortran
-      PkgConfig::FFTW3
-      PkgConfig::FFTW3F
-      ${FFTW_THREADS_TARGET}
   )
 
   target_link_libraries(
@@ -158,9 +72,6 @@ if(SHAFFT_EXAMPLES_STANDALONE AND TARGET shafft::shafftf03)
     PRIVATE
       shafft::shafftf03
       MPI::MPI_Fortran
-      PkgConfig::FFTW3
-      PkgConfig::FFTW3F
-      ${FFTW_THREADS_TARGET}
   )
 elseif(NOT SHAFFT_EXAMPLES_STANDALONE AND SHAFFT_BUILD_FORTRAN)
   enable_language(Fortran)
@@ -211,7 +122,7 @@ option(
 )
 
 if(SHAFFT_BUILD_HIPFORT_EXAMPLE)
-  if(NOT (SHAFFT_USE_HIPFFT OR SHAFFT_ENABLE_HIPFFT))
+  if(NOT SHAFFT_BACKEND_HIPFFT)
     message(
       WARNING
       "SHAFFT_BUILD_HIPFORT_EXAMPLE=ON but HIPFFT backend not enabled - skipping example_f03_hip"
@@ -241,9 +152,6 @@ if(SHAFFT_BUILD_HIPFORT_EXAMPLE)
           PRIVATE
             shafft::shafftf03
             MPI::MPI_Fortran
-            PkgConfig::FFTW3
-            PkgConfig::FFTW3F
-            ${FFTW_THREADS_TARGET}
         )
       else()
         target_include_directories(
