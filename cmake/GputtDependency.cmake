@@ -4,7 +4,7 @@ include_guard(GLOBAL)
 option(GPUTT_AUTO_FETCH "Fetch and build if find_package fails" ON)
 set(GPUTT_SOURCE_DIR "" CACHE PATH "Path to local gpuTT source directory")
 set(GPUTT_GIT_REPO "https://github.com/Edric-Matwiejew/gputt.git" CACHE STRING "gpuTT repository")
-set(GPUTT_GIT_TAG "" CACHE STRING "gpuTT commit or release tag (required when fetching)")
+set(GPUTT_GIT_TAG "fe512f410c074a8ef0fe7d6c1709c082ae18fe4f" CACHE STRING "gpuTT commit or release tag")
 option(GPUTT_BUILD_PYTHON "Build gpuTT Python bindings" OFF)
 
 if(CMAKE_HIP_PLATFORM STREQUAL "nvidia")
