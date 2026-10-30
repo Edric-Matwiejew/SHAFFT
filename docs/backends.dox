@@ -80,7 +80,8 @@ Uses [hipFFT](https://github.com/ROCm/hipFFT) for GPU-accelerated FFTs. Works wi
 
 | Requirement | Notes |
 |-------------|-------|
-| HIP + hipFFT | ROCm 6.0+ (AMD) or CUDA (NVIDIA) |
+| HIP + hipFFT | ROCm for AMD; HIP headers and hipFFT built for cuFFT on NVIDIA |
+| CUDA toolkit + NVCC | Required for NVIDIA; use Arm64 installations on GH200 |
 | GPU-aware MPI | Recommended; host staging available |
 
 ### Build Options
@@ -88,10 +89,11 @@ Uses [hipFFT](https://github.com/ROCm/hipFFT) for GPU-accelerated FFTs. Works wi
 | Option | Description | Default |
 |--------|-------------|---------|
 | `SHAFFT_ENABLE_HIPFFT` | Enable hipFFT backend | `ON` |
-| `HIP_PLATFORM` | Target: `amd` or `nvidia` | Auto |
+| `CMAKE_HIP_PLATFORM` | Target: `amd` or `nvidia` | Auto |
+| `CMAKE_HIP_COMPILER` | AMD HIP-Clang or NVIDIA `nvcc` | Auto |
 | `ROCM_PATH` | ROCm installation | `/opt/rocm` |
-| `CUDA_PATH` | CUDA path (if nvidia) | - |
-| `OFFLOAD_ARCH` | GPU architecture | Auto |
+| `CUDAToolkit_ROOT` | CUDA toolkit discovery hint | Auto |
+| `SHAFFT_GPU_ARCHITECTURES` | AMD `gfx*` or NVIDIA numeric architectures | Auto |
 | `SHAFFT_GPU_AWARE_MPI` | Use GPU-aware MPI | `ON` |
 
 CMake selects configuration and position-independent-code flags for the HIP compiler.
@@ -105,7 +107,8 @@ or toolchain file. The AMD GCC toolchain workarounds are not applied to NVCC.
 ```bash
 cmake -B build -S . \
     -DSHAFFT_ENABLE_HIPFFT=ON \
-    -DOFFLOAD_ARCH=gfx90a \
+    -DCMAKE_HIP_PLATFORM=amd \
+    -DSHAFFT_GPU_ARCHITECTURES=gfx90a \
     -DCMAKE_INSTALL_PREFIX=/opt/shafft
 
 cmake --build build --target install
@@ -122,19 +125,24 @@ AMD architectures:
 ```bash
 cmake -B build -S . \
     -DSHAFFT_ENABLE_HIPFFT=ON \
-    -DHIP_PLATFORM=nvidia \
-    -DCUDA_PATH=/usr/local/cuda \
-    -DOFFLOAD_ARCH=sm_86 \
+    -DCMAKE_HIP_PLATFORM=nvidia \
+    -DCMAKE_HIP_COMPILER=nvcc \
+    -DSHAFFT_GPU_ARCHITECTURES=90 \
+    -DCMAKE_PREFIX_PATH="/path/to/hip;/path/to/hipfft" \
     -DCMAKE_INSTALL_PREFIX=/opt/shafft
 
 cmake --build build --target install
 ```
 
-NVIDIA architectures:
-- `sm_70` - V100
-- `sm_80` - A100
-- `sm_86` - RTX 3090, A40
-- `sm_90` - H100
+NVIDIA architecture values are numeric CMake values: `80` for A100, `86` for
+RTX 3090/A40, and `90` for H100/GH200. Specify multiple architectures as a quoted
+semicolon-separated list. The selected CUDA toolkit must support every requested GPU.
+
+The CUDA toolkit does not provide HIP headers or hipFFT. Install a matching HIP
+portability layer and hipFFT with `BUILD_WITH_LIB=CUDA`, then put both prefixes in
+`CMAKE_PREFIX_PATH`. gpuTT uses its native CUDA backend on NVIDIA and HIP on AMD.
+Use `hipfft-nvidia` for initial host-staged builds or `hipfft-gh200` for Pawsey's
+Cray MPICH/GTL configuration; see @ref getting-started for cluster validation.
 
 ### Environment Variables
 

@@ -19,7 +19,7 @@
 
 | Backend | Target | Description |
 |---------|--------|-------------|
-| **hipFFT** | GPU | AMD and NVIDIA GPUs via ROCm/HIP |
+| **hipFFT** | GPU | AMD via ROCm; NVIDIA via HIP/NVCC and cuFFT |
 | **FFTW** | CPU | Multi-threaded CPU execution |
 
 ## Quick Start
@@ -29,7 +29,7 @@
 - CMake >= 3.28
 - MPI implementation
 - C++17-compatible compiler (GCC >= 10)
-- Backend: FFTW3 (CPU) or ROCm/HIP (GPU)
+- Backend: FFTW3 (CPU), ROCm/hipFFT (AMD), or CUDA plus HIP headers and hipFFT built for cuFFT (NVIDIA)
 
 ### Build
 
@@ -47,7 +47,6 @@ cmake --build build --target install
 cmake -B build -S . \
     -DSHAFFT_ENABLE_HIPFFT=ON \
     -DSHAFFT_GPU_AWARE_MPI=OFF \
-    -DGPUTT_SOURCE_DIR=/path/to/gputt \
     -DCMAKE_PREFIX_PATH=/opt/rocm \
     -DCMAKE_INSTALL_PREFIX=/opt/shafft
 
@@ -55,9 +54,15 @@ cmake --build build --target install
 ```
 
 GPU builds use the [maintained gpuTT fork](https://github.com/Edric-Matwiejew/gputt).
-Use `-DGPUTT_SOURCE_DIR="$PWD/gputt"` for a checkout inside SHAFFT. Alternatively,
-use an installed package via `gputt_DIR`, or set `GPUTT_GIT_TAG` to a published
-commit or release tag to fetch that revision. Dependency binaries stay in the build directory.
+The default source revision is pinned. Override it with `GPUTT_GIT_TAG`, use an installed
+package via `gputt_DIR`, or set `-DGPUTT_SOURCE_DIR="$PWD/gputt"` for local development.
+Dependency binaries stay in the build directory.
+
+For NVIDIA Hopper, configure with `cmake --preset hipfft-nvidia`, supplying the HIP
+and hipFFT install prefixes through `CMAKE_PREFIX_PATH`, then run
+`cmake --build --preset hipfft-nvidia`. The `hipfft-gh200` preset enables Cray
+GPU-aware MPI and Fortran for Pawsey; compile on an allocated GH200 node using its
+Arm software environment. See [GH200 setup and validation](docs/getting-started.dox).
 
 ### Example
 

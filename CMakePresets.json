@@ -68,7 +68,6 @@
         "SHAFFT_BUILD_EXAMPLES": "ON"
       }
     },
-    
     {
       "name": "hipfft-setonix",
       "displayName": "HIP/ROCm for Setonix (Pawsey)",
@@ -76,6 +75,29 @@
       "inherits": "hipfft-release",
       "cacheVariables": {
         "SHAFFT_GPU_ARCHITECTURES": "gfx90a",
+        "SHAFFT_REQUIRE_GTL": "ON",
+        "SHAFFT_BUILD_FORTRAN": "ON",
+        "SHAFFT_GPU_AWARE_MPI": "ON"
+      }
+    },
+    {
+      "name": "hipfft-nvidia",
+      "displayName": "HIP/CUDA Release",
+      "description": "NVIDIA GPU backend using NVCC and hipFFT/cuFFT with host-staged MPI",
+      "inherits": "hipfft-release",
+      "cacheVariables": {
+        "CMAKE_HIP_PLATFORM": "nvidia",
+        "CMAKE_HIP_COMPILER": "nvcc",
+        "SHAFFT_GPU_ARCHITECTURES": "90"
+      }
+    },
+    {
+      "name": "hipfft-gh200",
+      "displayName": "HIP/CUDA for GH200 (Pawsey)",
+      "description": "Grace Hopper with Cray MPICH and GPU-aware MPI",
+      "inherits": "hipfft-nvidia",
+      "cacheVariables": {
+        "SHAFFT_GPU_AWARE_MPI": "ON",
         "SHAFFT_REQUIRE_GTL": "ON",
         "SHAFFT_BUILD_FORTRAN": "ON"
       }
@@ -154,6 +176,14 @@
       "configurePreset": "hipfft-setonix"
     },
     {
+      "name": "hipfft-nvidia",
+      "configurePreset": "hipfft-nvidia"
+    },
+    {
+      "name": "hipfft-gh200",
+      "configurePreset": "hipfft-gh200"
+    },
+    {
       "name": "fftw-release",
       "configurePreset": "fftw-release"
     },
@@ -171,6 +201,20 @@
     }
   ],
   "testPresets": [
+    {
+      "name": "hipfft-nvidia",
+      "configurePreset": "hipfft-nvidia",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "hipfft-gh200",
+      "configurePreset": "hipfft-gh200",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
     {
       "name": "fftw",
       "configurePreset": "fftw-debug",

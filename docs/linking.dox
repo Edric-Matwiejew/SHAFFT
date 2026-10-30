@@ -37,7 +37,12 @@ cmake -DCMAKE_PREFIX_PATH=/opt/shafft ..
 | `shafft::shafftc` | C interface |
 | `shafft::shafftf03` | Fortran interface |
 
-Targets automatically include backend dependencies.
+Targets include backend dependencies, GPU platform definitions and include paths.
+NVIDIA consumers need the matching HIP headers, hipFFT/cuFFT and CUDA toolkit
+discoverable through `CMAKE_PREFIX_PATH`/`CUDAToolkit_ROOT`. Ordinary application
+sources can use the MPI C, C++ and Fortran compilers; CUDA/HIP language support is
+needed only for application GPU kernels. See @ref getting-started for installed
+consumer checks on GH200.
 
 ### Check Backend at Configure Time
 
@@ -81,7 +86,7 @@ mpifort -fopenmp -I/opt/shafft/include \
     -o my_program my_program.f03
 ```
 
-### hipFFT Backend
+### hipFFT Backend (AMD)
 
 **C++:**
 ```bash
@@ -94,7 +99,7 @@ hipcc -I/opt/shafft/include -I$ROCM_PATH/include \
 
 **C:**
 ```bash
-mpicc -I/opt/shafft/include \
+mpicc -D__HIP_PLATFORM_AMD__ -I/opt/shafft/include -I$ROCM_PATH/include \
     -L/opt/shafft/lib -lshafftc \
     -L$ROCM_PATH/lib -lamdhip64 -lhipfft -lm \
     -o my_program my_program.c
@@ -107,6 +112,9 @@ mpifort -I/opt/shafft/include \
     -L$ROCM_PATH/lib -lamdhip64 -lhipfft \
     -o my_program my_program.f03
 ```
+
+For NVIDIA builds, use the CMake targets above so the HIP NVIDIA definitions,
+CUDA runtime and hipFFT/cuFFT dependencies propagate to C, C++ and Fortran consumers.
 
 ## Runtime Library Path
 
