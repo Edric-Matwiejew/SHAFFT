@@ -11,7 +11,7 @@
  * 4. Parseval's theorem: sum|f(x)|^2 = (1/N) sum|F(k)|^2
  *
  * Uses configurationND to determine valid process grid for small tensor
- * dimensions to avoid zero-element rank allocation.
+ * dimensions, allowing inactive ranks to contribute zero to world reductions.
  */
 
 #include "test_utils.hpp"
@@ -63,6 +63,8 @@ void init_delta(shafft::complexd* data,
                 const std::vector<size_t>& offset,
                 const std::vector<int>& delta_pos) {
 
+  if (local_size == 0)
+    return;
   std::fill(data, data + local_size, shafft::complexd(0, 0));
 
   // Check if delta position is in our local slab
@@ -152,10 +154,8 @@ static bool test_delta_uniform_spectrum() {
   commDims[0] = worldSize;
 
   shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
+  SHAFFT_CHECK(fft.init(commDims, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD));
+  SHAFFT_CHECK(fft.plan());
 
   std::vector<size_t> subsize(dims.size()), offset(dims.size());
   SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
@@ -169,7 +169,8 @@ static bool test_delta_uniform_spectrum() {
 
   std::vector<shafft::complexd> host_data(alloc_elems);
   init_delta(host_data.data(), localElems, dims, subsize, offset, delta_pos);
-  SHAFFT_CHECK(shafft::copyToBuffer(data, host_data.data(), alloc_elems));
+  if (fft.isActive())
+    SHAFFT_CHECK(shafft::copyToBuffer(data, host_data.data(), alloc_elems));
 
   SHAFFT_CHECK(fft.setBuffers(data, work));
   SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
@@ -183,7 +184,8 @@ static bool test_delta_uniform_spectrum() {
   size_t final_local_elems = test::product(final_subsize);
 
   std::vector<shafft::complexd> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
+  if (fft.isActive())
+    SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
 
   // FFT of delta at origin should be constant 1.0 everywhere
   double max_dev = 0;
@@ -220,10 +222,8 @@ static bool test_plane_wave_to_delta() {
   commDims[0] = worldSize;
 
   shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
+  SHAFFT_CHECK(fft.init(commDims, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD));
+  SHAFFT_CHECK(fft.plan());
 
   std::vector<size_t> subsize(dims.size()), offset(dims.size());
   SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
@@ -237,7 +237,8 @@ static bool test_plane_wave_to_delta() {
 
   std::vector<shafft::complexd> host_data(alloc_elems);
   init_plane_wave(host_data.data(), localElems, dims, subsize, offset, kvec);
-  SHAFFT_CHECK(shafft::copyToBuffer(data, host_data.data(), alloc_elems));
+  if (fft.isActive())
+    SHAFFT_CHECK(shafft::copyToBuffer(data, host_data.data(), alloc_elems));
 
   SHAFFT_CHECK(fft.setBuffers(data, work));
   SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
@@ -250,7 +251,8 @@ static bool test_plane_wave_to_delta() {
   size_t final_local_elems = test::product(final_subsize);
 
   std::vector<shafft::complexd> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
+  if (fft.isActive())
+    SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
 
   // Find local max magnitude
   double local_max = 0;
@@ -290,10 +292,8 @@ static bool test_constant_to_dc() {
   commDims[0] = worldSize;
 
   shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
+  SHAFFT_CHECK(fft.init(commDims, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD));
+  SHAFFT_CHECK(fft.plan());
 
   std::vector<size_t> subsize(dims.size()), offset(dims.size());
   SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
@@ -305,7 +305,8 @@ static bool test_constant_to_dc() {
   SHAFFT_CHECK(shafft::allocBuffer(alloc_elems, &work));
 
   std::vector<shafft::complexd> host_data(alloc_elems, constant_val);
-  SHAFFT_CHECK(shafft::copyToBuffer(data, host_data.data(), alloc_elems));
+  if (fft.isActive())
+    SHAFFT_CHECK(shafft::copyToBuffer(data, host_data.data(), alloc_elems));
 
   SHAFFT_CHECK(fft.setBuffers(data, work));
   SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
@@ -318,7 +319,8 @@ static bool test_constant_to_dc() {
   size_t final_local_elems = test::product(final_subsize);
 
   std::vector<shafft::complexd> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
+  if (fft.isActive())
+    SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
 
   // Find max magnitude (should be DC)
   double local_max = 0;
@@ -359,10 +361,8 @@ static bool test_parseval() {
   commDims[0] = worldSize;
 
   shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
+  SHAFFT_CHECK(fft.init(commDims, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD));
+  SHAFFT_CHECK(fft.plan());
 
   std::vector<size_t> subsize(dims.size()), offset(dims.size());
   SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
@@ -390,7 +390,8 @@ static bool test_parseval() {
   double global_input_energy;
   MPI_Allreduce(&local_input_energy, &global_input_energy, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
 
-  SHAFFT_CHECK(shafft::copyToBuffer(data, host_data.data(), alloc_elems));
+  if (fft.isActive())
+    SHAFFT_CHECK(shafft::copyToBuffer(data, host_data.data(), alloc_elems));
   SHAFFT_CHECK(fft.setBuffers(data, work));
   SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
 
@@ -402,7 +403,8 @@ static bool test_parseval() {
   size_t final_local_elems = test::product(final_subsize);
 
   std::vector<shafft::complexd> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
+  if (fft.isActive())
+    SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
 
   // Compute output energy
   double local_output_energy = local_energy(result.data(), final_local_elems);
@@ -436,10 +438,8 @@ static bool test_5d_plane_wave() {
     return false;
 
   shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
+  SHAFFT_CHECK(fft.init(commDims, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD));
+  SHAFFT_CHECK(fft.plan());
 
   std::vector<size_t> subsize(dims.size()), offset(dims.size());
   SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
@@ -453,7 +453,8 @@ static bool test_5d_plane_wave() {
 
   std::vector<shafft::complexd> host_data(alloc_elems);
   init_plane_wave(host_data.data(), localElems, dims, subsize, offset, kvec);
-  SHAFFT_CHECK(shafft::copyToBuffer(data, host_data.data(), alloc_elems));
+  if (fft.isActive())
+    SHAFFT_CHECK(shafft::copyToBuffer(data, host_data.data(), alloc_elems));
 
   SHAFFT_CHECK(fft.setBuffers(data, work));
   SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
@@ -466,7 +467,8 @@ static bool test_5d_plane_wave() {
   size_t final_local_elems = test::product(final_subsize);
 
   std::vector<shafft::complexd> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
+  if (fft.isActive())
+    SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
 
   // Find max
   double local_max = 0;
@@ -500,10 +502,8 @@ static bool test_7d_delta() {
     return false;
 
   shafft::FFTND fft;
-  int rc = fft.init(commDims, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD);
-  rc = fft.plan();
-  if (rc != 0)
-    return false;
+  SHAFFT_CHECK(fft.init(commDims, dims, shafft::FFTType::Z2Z, MPI_COMM_WORLD));
+  SHAFFT_CHECK(fft.plan());
 
   std::vector<size_t> subsize(dims.size()), offset(dims.size());
   SHAFFT_CHECK(fft.getLayout(subsize, offset, shafft::TensorLayout::CURRENT));
@@ -517,7 +517,8 @@ static bool test_7d_delta() {
 
   std::vector<shafft::complexd> host_data(alloc_elems);
   init_delta(host_data.data(), localElems, dims, subsize, offset, delta_pos);
-  SHAFFT_CHECK(shafft::copyToBuffer(data, host_data.data(), alloc_elems));
+  if (fft.isActive())
+    SHAFFT_CHECK(shafft::copyToBuffer(data, host_data.data(), alloc_elems));
 
   SHAFFT_CHECK(fft.setBuffers(data, work));
   SHAFFT_CHECK(fft.execute(shafft::FFTDirection::FORWARD));
@@ -530,7 +531,8 @@ static bool test_7d_delta() {
   size_t final_local_elems = test::product(final_subsize);
 
   std::vector<shafft::complexd> result(alloc_elems);
-  SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
+  if (fft.isActive())
+    SHAFFT_CHECK(shafft::copyFromBuffer(result.data(), final_data, alloc_elems));
 
   // All values should have magnitude 1
   double max_dev = 0;
