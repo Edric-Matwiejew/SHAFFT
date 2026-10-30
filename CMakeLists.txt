@@ -4,7 +4,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
   message(FATAL_ERROR "In-source builds are not allowed.")
 endif()
 
-project(shafft VERSION 1.1.0 DESCRIPTION "N-D HIP-accelerated MPI-parallel FFT." LANGUAGES CXX)
+project(shafft VERSION 1.1.0 DESCRIPTION "N-D HIP-accelerated MPI-parallel FFT." LANGUAGES C CXX)
 
 set(SHAFFT_VERSION_SUFFIX "-alpha" CACHE STRING "version suffix")
 
@@ -53,7 +53,7 @@ set(
   SHAFFT_GPU_ARCHITECTURES
   ""
   CACHE STRING
-  "GPU architectures (e.g., gfx90a;gfx942 or sm_80;sm_90); empty = auto-detect"
+  "GPU architectures (e.g., gfx90a;gfx942 or 80;90 for NVIDIA); empty = auto-detect"
 )
 
 if(SHAFFT_ENABLE_HIPFFT)
@@ -127,8 +127,12 @@ if(SHAFFT_ENABLE_HIPFFT)
     list(APPEND CMAKE_PREFIX_PATH "/opt/rocm" "/opt/rocm/lib/cmake")
   endif()
 
+  set(HIP_PLATFORM "${CMAKE_HIP_PLATFORM}")
   find_package(hip REQUIRED CONFIG)
-  find_package(hipfft REQUIRED)
+  if(CMAKE_HIP_PLATFORM STREQUAL "nvidia")
+    include(HipNvidia)
+  endif()
+  find_package(hipfft REQUIRED CONFIG)
 
   if(SHAFFT_GPU_AWARE_MPI)
     option(SHAFFT_REQUIRE_GTL "Require GTL library for GPU-aware MPI on Cray systems" OFF)
@@ -289,6 +293,8 @@ target_include_directories(
 
 if(SHAFFT_ENABLE_HIPFFT)
   target_link_libraries(shafft_options INTERFACE hip::host)
+else()
+  target_include_directories(shafft_options INTERFACE $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>)
 endif()
 
 target_compile_options(
@@ -380,6 +386,7 @@ install(
   FILES
     ${_shafft_cmake_builddir}/shafftConfig.cmake
     ${_shafft_cmake_builddir}/shafftConfigVersion.cmake
+    ${CMAKE_SOURCE_DIR}/cmake/HipNvidia.cmake
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/shafft
 )
 

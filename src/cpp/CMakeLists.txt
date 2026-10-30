@@ -21,7 +21,7 @@ if(SHAFFT_ENABLE_HIPFFT)
     ${FFT_METHOD_PATH}
   )
   target_link_libraries(
-    fftnd_method PRIVATE shafft_options hip::host hip::hipfft MPI::MPI_CXX gputt
+    fftnd_method PRIVATE shafft_options hip::hipfft MPI::MPI_CXX gputt
   )
 
   target_include_directories(fft1d_method PRIVATE
@@ -30,7 +30,7 @@ if(SHAFFT_ENABLE_HIPFFT)
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${FFT_METHOD_PATH}
   )
-  target_link_libraries(fft1d_method PRIVATE shafft_options hip::host hip::hipfft MPI::MPI_CXX)
+  target_link_libraries(fft1d_method PRIVATE shafft_options hip::hipfft MPI::MPI_CXX)
 
   add_library(shafft OBJECT
     slab_nd.cpp
@@ -45,7 +45,7 @@ if(SHAFFT_ENABLE_HIPFFT)
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${FFT_METHOD_PATH}
   )
-  target_link_libraries(shafft PRIVATE shafft_options MPI::MPI_CXX hip::host hip::hipfft gputt)
+  target_link_libraries(shafft PRIVATE shafft_options MPI::MPI_CXX hip::hipfft gputt)
   if(SHAFFT_HAVE_GTL)
     target_link_libraries(shafft PRIVATE CrayGTL::CrayGTL)
   endif()
@@ -66,7 +66,7 @@ if(SHAFFT_ENABLE_HIPFFT)
     ${FFT_METHOD_PATH}
   )
   target_link_libraries(
-    shafftc++ PUBLIC shafft_options MPI::MPI_CXX PRIVATE hip::host hip::hipfft gputt
+    shafftc++ PUBLIC shafft_options MPI::MPI_CXX PRIVATE hip::hipfft gputt
   )
   if(SHAFFT_HAVE_GTL)
     target_link_libraries(shafftc++ PRIVATE CrayGTL::CrayGTL)

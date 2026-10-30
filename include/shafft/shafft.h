@@ -20,7 +20,12 @@
 #include <stddef.h> // NOLINT(modernize-deprecated-headers)
 
 #if SHAFFT_BACKEND_HIPFFT
+#if defined(__HIP_PLATFORM_NVIDIA__) && !defined(__cplusplus)
+#include <cuda_runtime_api.h>
+typedef cudaStream_t hipStream_t;
+#else
 #include <hip/hip_runtime_api.h>
+#endif
 #endif
 
 #ifdef __cplusplus

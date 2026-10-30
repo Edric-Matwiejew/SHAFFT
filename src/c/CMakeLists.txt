@@ -5,10 +5,6 @@ target_include_directories(_shafftc PRIVATE
 )
 target_link_libraries(_shafftc PRIVATE shafft_options MPI::MPI_CXX)
 
-if(SHAFFT_ENABLE_HIPFFT)
-  target_link_libraries(_shafftc PRIVATE hip::host)
-endif()
-
 if(SHAFFT_ENABLE_FFTW)
   target_include_directories(_shafftc PRIVATE ${FFTW_INCLUDE_DIRS})
 endif()
@@ -38,9 +34,9 @@ if(SHAFFT_ENABLE_HIPFFT)
   target_link_libraries(shafftc
     PUBLIC
       shafft_options
-      MPI::MPI_CXX
+      MPI::MPI_C
     PRIVATE
-      hip::host
+      MPI::MPI_CXX
       hip::hipfft
       gputt
   )
@@ -57,8 +53,8 @@ elseif(SHAFFT_ENABLE_FFTW)
   add_library(shafftc SHARED ${SHAFFTC_OBJECTS})
 
   target_link_libraries(shafftc
-    PUBLIC  shafft_options MPI::MPI_CXX
-    PRIVATE FFTW::Double FFTW::Float FFTW::DoubleMPI FFTW::FloatMPI
+    PUBLIC  shafft_options MPI::MPI_C
+    PRIVATE MPI::MPI_CXX FFTW::Double FFTW::Float FFTW::DoubleMPI FFTW::FloatMPI
   )
   if(SHAFFT_FFTW_USE_OMP)
     target_link_libraries(shafftc PRIVATE FFTW::DoubleOpenMP FFTW::FloatOpenMP)

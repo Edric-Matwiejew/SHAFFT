@@ -24,7 +24,7 @@ set_target_properties(shafftf03 PROPERTIES LINKER_LANGUAGE Fortran)
 
 add_dependencies(shafftf03 shafft fftnd_method fft1d_method)
 
-target_link_libraries(shafftf03 PRIVATE shafft_options)
+target_link_libraries(shafftf03 PRIVATE shafft_options MPI::MPI_CXX)
 
 target_include_directories(shafftf03
   PUBLIC
@@ -42,15 +42,13 @@ target_include_directories(shafftf03
 
 if(SHAFFT_ENABLE_HIPFFT)
   target_link_libraries(shafftf03 
-    PRIVATE hip::host hip::hipfft gputt
-    PUBLIC MPI::MPI_CXX
+    PRIVATE hip::hipfft gputt
   )
   if(SHAFFT_HAVE_GTL)
     target_link_libraries(shafftf03 PRIVATE CrayGTL::CrayGTL)
   endif()
 elseif(SHAFFT_ENABLE_FFTW)
   target_link_libraries(shafftf03 
-    PUBLIC MPI::MPI_CXX
     PRIVATE FFTW::Double FFTW::Float FFTW::DoubleMPI FFTW::FloatMPI
   )
   if(SHAFFT_FFTW_USE_OMP)
